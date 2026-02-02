@@ -1,6 +1,5 @@
 import asyncio
 from random import randint
-
 import pygame
 from aioquic.asyncio import connect, QuicConnectionProtocol
 from aioquic.quic.configuration import QuicConfiguration
@@ -8,9 +7,7 @@ from aioquic.quic.events import StreamDataReceived, QuicEvent
 
 
 class GameState:
-    # Your local position (for prediction/sending)
-    my_pos = [randint(0, 400), randint(0,300)]
-    # Dictionary of other players: { "client_id": (x, y) }
+    my_pos = [randint(0, 350), randint(0, 250)]
     other_players = {}
 
 
@@ -20,69 +17,74 @@ state = GameState()
 class EchoClientProtocol(QuicConnectionProtocol):
     def quic_event_received(self, event: QuicEvent) -> None:
         if isinstance(event, StreamDataReceived):
-            data = event.data.decode("utf-8")
+            data_chunk = event.data.decode("utf-8")
+            # פירוק ההודעות לפי ירידת שורה למניעת הדבקה
+            messages = data_chunk.split('\n')
 
-            # Handle Broadcast Update: "UPDATE|client_id|x,y"
-            if data.startswith("UPDATE|"):
-                parts = data.split("|")
-                if len(parts) == 3:
-                    p_id = parts[1]
-                    coords = parts[2].split(",")
+            for msg in messages:
+                if not msg: continue
 
-                    # Only update if it's not us (server might reflect our own move back)
-                    # You can compare p_id with self._quic.original_destination_connection_id if needed
-                    state.other_players[p_id] = (int(coords[0]), int(coords[1]))
+                if msg.startswith("UPDATE|"):
+                    try:
+                        parts = msg.split("|")
+                        p_id = parts[1]
+                        coords = parts[2].split(",")
+                        state.other_players[p_id] = (int(coords[0]), int(coords[1]))
+                    except:
+                        print(f"Error parsing update: {msg}")
 
-            elif data.startswith("REMOVE|"):
-                p_id = data.split("|")[1]
-                if p_id in state.other_players:
-                    del state.other_players[p_id]
+                elif msg.startswith("REMOVE|"):
+                    try:
+                        p_id = msg.split("|")[1]
+                        if p_id in state.other_players:
+                            del state.other_players[p_id]
+                    except:
+                        pass
+
 
 async def run_pygame(client, stream_id):
     pygame.init()
     screen = pygame.display.set_mode((400, 300))
+    pygame.display.set_caption("QUIC Game")
     clock = pygame.time.Clock()
-    client._quic.send_stream_data(stream_id, "Connected pos:{},{}".format(state.my_pos[0], state.my_pos[1]).encode(), end_stream=False)
+
+    # שליחת הודעת התחברות עם \n בסוף
+    login_msg = f"Connected:{state.my_pos[0]},{state.my_pos[1]}\n".encode()
+    client._quic.send_stream_data(stream_id, login_msg, end_stream=False)
     client.transmit()
 
-    while True:
+    running = True
+    while running:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                client._quic.send_stream_data(stream_id, b"Disconnected", end_stream=False)
+                client._quic.send_stream_data(stream_id, b"Disconnected\n", end_stream=False)
                 client.transmit()
-                return
+                running = False
 
-        # --- Input Handling ---
+        # תזוזה
         keys = pygame.key.get_pressed()
         moved = False
-        if keys[pygame.K_a]:
-            state.my_pos[0] -= 5
-            moved = True
-        if keys[pygame.K_d]:
-            state.my_pos[0] += 5
-            moved = True
-        if keys[pygame.K_w]:
-            state.my_pos[1] -= 5
-            moved = True
-        if keys[pygame.K_s]:
-            state.my_pos[1] += 5
-            moved = True
+        step = 5
+        if keys[pygame.K_a]: state.my_pos[0] -= step; moved = True
+        if keys[pygame.K_d]: state.my_pos[0] += step; moved = True
+        if keys[pygame.K_w]: state.my_pos[1] -= step; moved = True
+        if keys[pygame.K_s]: state.my_pos[1] += step; moved = True
 
-        # --- Network Sync ---
         if moved:
-            msg = f"moved to:{state.my_pos[0]},{state.my_pos[1]}".encode()
+            # שליחת מיקום עם \n בסוף
+            msg = f"moved to:{state.my_pos[0]},{state.my_pos[1]}\n".encode()
             client._quic.send_stream_data(stream_id, msg, end_stream=False)
             client.transmit()
 
-        # --- Drawing ---
+        # ציור
         screen.fill((30, 30, 30))
 
-        # 1. Draw Other Players (Blue)
-        for p_id, pos in state.other_players.items():
-            pygame.draw.rect(screen, (20, 20, 120), (*pos, 40, 40))
+        # שחקנים אחרים (כחול)
+        for p_id, pos in list(state.other_players.items()):
+            pygame.draw.rect(screen, (50, 100, 255), (*pos, 30, 30))
 
-        # 2. Draw My Player (Red)
-        pygame.draw.rect(screen, (120, 20, 20), (*state.my_pos, 40, 40))
+        # השחקן שלי (אדום)
+        pygame.draw.rect(screen, (255, 50, 50), (*state.my_pos, 30, 30))
 
         pygame.display.flip()
         await asyncio.sleep(0)
@@ -96,11 +98,15 @@ async def main():
         is_client=True,
         alpn_protocols=["echo-protocol"],
     )
+    # שים לב: בדרך כלל בקליינט לא צריך מפתח פרטי, רק verify אם רוצים
+    configuration.verify_mode = False
 
-    configuration.load_verify_locations("../cert.pem")
     print("Connecting to server...")
+    # אם אתה מריץ מקומית, השתמש ב-127.0.0.1. אם לא, ב-IP של השרת
+    target_ip = "127.0.0.1"
+
     async with connect(
-            "10.12.9.203",
+            target_ip,
             4433,
             configuration=configuration,
             create_protocol=EchoClientProtocol,
