@@ -1,118 +1,114 @@
 import asyncio
-from aioquic.asyncio import QuicConnectionProtocol, serve
+from random import randint
+
+import pygame
+from aioquic.asyncio import connect, QuicConnectionProtocol
 from aioquic.quic.configuration import QuicConfiguration
-from aioquic.quic.events import StreamDataReceived, QuicEvent, ConnectionTerminated
+from aioquic.quic.events import StreamDataReceived, QuicEvent
 
 
 class GameState:
-    players_pos = {}
-    active_clients = set()
+    # Your local position (for prediction/sending)
+    my_pos = [randint(0, 400), randint(0,300)]
+    # Dictionary of other players: { "client_id": (x, y) }
+    other_players = {}
 
 
 state = GameState()
 
 
-class EchoQuicProtocol(QuicConnectionProtocol):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        state.active_clients.add(self)
-        self.client_id = None
-
+class EchoClientProtocol(QuicConnectionProtocol):
     def quic_event_received(self, event: QuicEvent) -> None:
         if isinstance(event, StreamDataReceived):
-            # 1. פענוח המידע והפרדה לפי שורות (למניעת הדבקת חבילות)
-            data_chunk = event.data.decode("utf-8")
-            messages = data_chunk.split('\n')  # מפרידים הודעות לפי ירידת שורה
+            data = event.data.decode("utf-8")
 
-            for message in messages:
-                if not message: continue  # דילוג על שורות ריקות
+            # Handle Broadcast Update: "UPDATE|client_id|x,y"
+            if data.startswith("UPDATE|"):
+                parts = data.split("|")
+                if len(parts) == 3:
+                    p_id = parts[1]
+                    coords = parts[2].split(",")
 
-                self.process_message(message)
+                    # Only update if it's not us (server might reflect our own move back)
+                    # You can compare p_id with self._quic.original_destination_connection_id if needed
+                    state.other_players[p_id] = (int(coords[0]), int(coords[1]))
 
-        elif isinstance(event, ConnectionTerminated):
-            print(f"Client {self.client_id} disconnected (Terminated)")
-            self.remove_player()
+            elif data.startswith("REMOVE|"):
+                p_id = data.split("|")[1]
+                if p_id in state.other_players:
+                    del state.other_players[p_id]
 
-    def process_message(self, data_str):
-        # קבלת ה-ID הייחודי של החיבור
-        self.client_id = self._quic.host_cid.hex()
+async def run_pygame(client, stream_id):
+    pygame.init()
+    screen = pygame.display.set_mode((400, 300))
+    clock = pygame.time.Clock()
+    client._quic.send_stream_data(stream_id, "Connected pos:{},{}".format(state.my_pos[0], state.my_pos[1]).encode(), end_stream=False)
+    client.transmit()
 
-        if data_str.startswith("Connected"):
-            try:
-                # פורמט צפוי: "Connected:x,y"
-                start_pos = data_str.split(':')[1]
-                state.players_pos[self.client_id] = start_pos
-                print(f"New player: {self.client_id} at {start_pos}")
-
-                # 1. שליחת המיקום של כל השחקנים האחרים לשחקן החדש
-                for other_id, pos in state.players_pos.items():
-                    if other_id != self.client_id:
-                        # שים לב ל-\n בסוף!
-                        sync_msg = f"UPDATE|{other_id}|{pos}\n".encode()
-                        self._quic.send_stream_data(0, sync_msg, end_stream=False)
-
-                # 2. עדכון כולם על השחקן החדש
-                self.broadcast_position(self.client_id, start_pos, False)
-
-            except Exception as e:
-                print(f"Error parsing connection: {e}")
-
-        elif data_str.startswith("moved to:"):
-            try:
-                new_pos = data_str.split(":")[1]
-                state.players_pos[self.client_id] = new_pos
-                self.broadcast_position(self.client_id, new_pos, False)
-            except:
-                pass
-
-        elif data_str == "Disconnected":
-            self.remove_player()
-
-    def remove_player(self):
-        if self in state.active_clients:
-            state.active_clients.remove(self)
-        if self.client_id and self.client_id in state.players_pos:
-            del state.players_pos[self.client_id]
-            self.broadcast_remove(self.client_id)
-
-    def broadcast_remove(self, client_id):
-        message = f"REMOVE|{client_id}\n".encode("utf-8")  # הוספנו \n
-        for client in state.active_clients:
-            try:
-                client._quic.send_stream_data(0, message, end_stream=False)
+    while True:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                client._quic.send_stream_data(stream_id, b"Disconnected", end_stream=False)
                 client.transmit()
-            except:
-                pass
+                return
 
-    def broadcast_position(self, sender_id, pos_str, to_yourself):
-        message = f"UPDATE|{sender_id}|{pos_str}\n".encode("utf-8")  # הוספנו \n
+        # --- Input Handling ---
+        keys = pygame.key.get_pressed()
+        moved = False
+        if keys[pygame.K_a]:
+            state.my_pos[0] -= 5
+            moved = True
+        if keys[pygame.K_d]:
+            state.my_pos[0] += 5
+            moved = True
+        if keys[pygame.K_w]:
+            state.my_pos[1] -= 5
+            moved = True
+        if keys[pygame.K_s]:
+            state.my_pos[1] += 5
+            moved = True
 
-        for client in state.active_clients:
-            if client == self and not to_yourself: continue
-            try:
-                client._quic.send_stream_data(0, message, end_stream=False)
-                client.transmit()
-            except:
-                pass
+        # --- Network Sync ---
+        if moved:
+            msg = f"moved to:{state.my_pos[0]},{state.my_pos[1]}".encode()
+            client._quic.send_stream_data(stream_id, msg, end_stream=False)
+            client.transmit()
+
+        # --- Drawing ---
+        screen.fill((30, 30, 30))
+
+        # 1. Draw Other Players (Blue)
+        for p_id, pos in state.other_players.items():
+            pygame.draw.rect(screen, (20, 20, 120), (*pos, 40, 40))
+
+        # 2. Draw My Player (Red)
+        pygame.draw.rect(screen, (120, 20, 20), (*state.my_pos, 40, 40))
+
+        pygame.display.flip()
+        await asyncio.sleep(0)
+        clock.tick(60)
+
+    pygame.quit()
 
 
 async def main():
     configuration = QuicConfiguration(
-        is_client=False,
+        is_client=True,
         alpn_protocols=["echo-protocol"],
-        verify_mode=False
     )
-    # וודא שהנתיבים לקבצים נכונים ביחס לאיפה שאתה מריץ
-    configuration.load_cert_chain("cert.pem", "server/key.pem")
 
-    print("Starting QUIC server on udp:0.0.0.0:4433")
-    await serve(
-        host="0.0.0.0",
-        port=4433,
-        configuration=configuration,
-        create_protocol=EchoQuicProtocol,
-    )
-    await asyncio.Future()
+    configuration.load_verify_locations("../cert.pem")
+    print("Connecting to server...")
+    async with connect(
+            "10.12.9.203",
+            4433,
+            configuration=configuration,
+            create_protocol=EchoClientProtocol,
+    ) as client:
+        await client.wait_connected()
+        print("Connected!")
+        stream_id = client._quic.get_next_available_stream_id()
+        await run_pygame(client, stream_id)
 
 
 if __name__ == "__main__":
