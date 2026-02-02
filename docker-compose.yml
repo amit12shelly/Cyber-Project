@@ -3,13 +3,13 @@ version: '3.13'
 services:
   game-server:
     build:
-      context: .
+      context: ./server
       dockerfile: Dockerfile
     ports:
       - "4433:4433/udp"
     volumes:
       - ./cert.pem:/cert.pem:ro
-      - ./key.pem:/server/key.pem:ro
+      - ./server/key.pem:/server/key.pem:ro
     environment:
       - PYTHONUNBUFFERED=1
     restart: unless-stopped

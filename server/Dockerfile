@@ -1,13 +1,12 @@
 FROM python:3.13-slim
 
-COPY server /server
+COPY . /server
 
 WORKDIR /server
 
-EXPOSE 4433
+EXPOSE 4433/udp
 
-RUN "pip install pygame"
-RUN "pip install aioquic"
-RUN "pip install asyncio"
+RUN pip install pygame aioquic
 
-CMD python main.py
+
+CMD ["python", "main.py"]
