@@ -38,7 +38,11 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                         self._quic.send_stream_data(0, sync_msg, end_stream=False)
 
                 # 3. Tell EVERYONE ELSE that this new player has joined
-                self.broadcast_position(client_id, state.players_pos[client_id], False)
+                # בדיקה אם השחקן קיים ברשימה לפני שניגשים אליו
+                if client_id in state.players_pos:
+                    self.broadcast_position(client_id, state.players_pos[client_id], False)
+                else:
+                    print(f"Warning: Tried to broadcast position for unknown client {client_id}")
                 self.transmit()
 
             elif data_str.startswith("moved to:"):
