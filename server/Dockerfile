@@ -8,5 +8,6 @@ EXPOSE 4433
 
 RUN "pip install pygame"
 RUN "pip install aioquic"
+RUN "pip install psutil"
 
 CMD python main.py

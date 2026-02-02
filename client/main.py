@@ -95,6 +95,7 @@ async def main():
     configuration = QuicConfiguration(
         is_client=True,
         alpn_protocols=["echo-protocol"],
+        verify_mode=False
     )
 
     configuration.load_verify_locations("../cert.pem")

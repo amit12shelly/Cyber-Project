@@ -1,7 +1,10 @@
 import asyncio
+from time import sleep
+
 from aioquic.asyncio import QuicConnectionProtocol, serve
 from aioquic.quic.configuration import QuicConfiguration
 from aioquic.quic.events import StreamDataReceived, QuicEvent, ConnectionTerminated
+import psutil
 
 class GameState:
     players_pos = {}
@@ -70,7 +73,8 @@ async def main():
     # 1. Define the QUIC configuration
     configuration = QuicConfiguration(
         is_client=False,
-        alpn_protocols=["echo-protocol"] # Custom protocol name
+        alpn_protocols=["echo-protocol"],# Custom protocol name
+        verify_mode = False,
     )
 
     # 2. Load the SSL certificate and private key
@@ -84,9 +88,15 @@ async def main():
         configuration=configuration,
         create_protocol=EchoQuicProtocol,
     )
-
+    asyncio.create_task(checkCPU())
     # Keep the server running
     await asyncio.Future()
+
+async def checkCPU():
+    while True:
+        cpu_usage = psutil.cpu_percent(interval=1.0)
+        print(cpu_usage)
+        await asyncio.sleep(5)
 
 if __name__ == "__main__":
     try:
