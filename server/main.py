@@ -26,7 +26,10 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             if data_str.startswith("Connected"):
                 # 1. Initialize this player in the master list if they aren't there
                 if client_id not in state.players_pos:
-                    state.players_pos[client_id] = data_str.split(':')[1]
+                    try:
+                        state.players_pos[client_id] = data_str.split(':')[1]
+                    except:
+                        print("input incorrect")
 
                     # 2. Tell the NEW player where EVERYONE ELSE is
                 for other_id, pos in state.players_pos.items():
@@ -70,7 +73,8 @@ async def main():
     # 1. Define the QUIC configuration
     configuration = QuicConfiguration(
         is_client=False,
-        alpn_protocols=["echo-protocol"] # Custom protocol name
+        alpn_protocols=["echo-protocol"], # Custom protocol name
+        verify_mode = False
     )
 
     # 2. Load the SSL certificate and private key
