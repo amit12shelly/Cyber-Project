@@ -97,6 +97,7 @@ async def main():
     configuration = QuicConfiguration(
         is_client=True,
         alpn_protocols=["echo-protocol"],
+        verify_mode=False
     )
     # שים לב: בדרך כלל בקליינט לא צריך מפתח פרטי, רק verify אם רוצים
     configuration.verify_mode = False
