@@ -6,9 +6,7 @@ async def connect_to_game():
     try:
         print(f"Connecting to Load Balancer at {lb_host}:{lb_port}...")
 
-        # פתיחת חיבור ל-Load Balancer
         reader, writer = await asyncio.open_connection(lb_host, lb_port)
-        # קריאת התגובה (ה-IP של שרת המשחק)
         data = await reader.read(100)
         message = data.decode().strip()
 

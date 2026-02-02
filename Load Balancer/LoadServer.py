@@ -6,6 +6,7 @@ server_pool = {
     "server_1": {"ip": "192.168.1.10", "cpu": 60.2},
     "server_2": {"ip": "192.168.1.11", "cpu": 50.4},
     "server_3": {"ip": "192.168.1.13", "cpu": 95.8},
+    "server_4": {"ip": "192.168.1.4", "cpu": 12.4},
 }
 
 async def update_server_stats():
@@ -31,7 +32,7 @@ async def handle_client(reader, writer):
 async def main():
     # Start the heartbeat listener
     asyncio.create_task(update_server_stats())
-    server = await asyncio.start_server(handle_client, '127.0.0.1', 8080)
+    server = await asyncio.start_server(handle_client, '0.0.0.0', 8080)
     async with server:
         await server.serve_forever()
 
