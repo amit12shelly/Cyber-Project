@@ -103,8 +103,7 @@ async def main():
     configuration.verify_mode = False
 
     print("Connecting to server...")
-    # אם אתה מריץ מקומית, השתמש ב-127.0.0.1. אם לא, ב-IP של השרת
-    target_ip = "127.0.0.1"
+    target_ip = "192.168.0.211"
 
     async with connect(
             target_ip,
