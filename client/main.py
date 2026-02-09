@@ -128,7 +128,7 @@ async def main():
         verify_mode=False  # Simplified for your local setup
     )
 
-    print("Connecting to server...")
+    print("Conecting to server...")
     ip, port = await connect_lb()
     async with connect(
             ip,
