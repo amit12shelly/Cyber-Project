@@ -1,15 +1,12 @@
 import asyncio
-from random import randint
-
 import pygame
 from aioquic.asyncio import connect, QuicConnectionProtocol
 from aioquic.quic.configuration import QuicConfiguration
 from aioquic.quic.events import StreamDataReceived, QuicEvent
 
-
 class GameState:
     # Your local position (for prediction/sending)
-    my_pos = [randint(0, 400), randint(0,300)]
+    my_pos = [100, 100]
     # Dictionary of other players: { "client_id": (x, y) }
     other_players = {}
 
@@ -42,7 +39,7 @@ async def run_pygame(client, stream_id):
     pygame.init()
     screen = pygame.display.set_mode((400, 300))
     clock = pygame.time.Clock()
-    client._quic.send_stream_data(stream_id, "Connected pos:{},{}".format(state.my_pos[0], state.my_pos[1]).encode(), end_stream=False)
+    client._quic.send_stream_data(stream_id, b"Connected", end_stream=False)
     client.transmit()
 
     while True:
@@ -50,6 +47,7 @@ async def run_pygame(client, stream_id):
             if event.type == pygame.QUIT:
                 client._quic.send_stream_data(stream_id, b"Disconnected", end_stream=False)
                 client.transmit()
+                pygame.quit()
                 return
 
         # --- Input Handling ---
@@ -88,20 +86,53 @@ async def run_pygame(client, stream_id):
         await asyncio.sleep(0)
         clock.tick(60)
 
-    pygame.quit()
+async def connect_lb():
+    lb_host = '127.0.0.1'
+    lb_port = 8080
+    try:
+        print(f"Connecting to Load Balancer at {lb_host}:{lb_port}...")
+        reader, writer = await asyncio.open_connection(lb_host, lb_port)
+        coords = input("Enter your coordinates (format: x,y): ")
+
+        writer.write(coords.encode())
+        await writer.drain()
+
+        data = await reader.read(100)
+        message = data.decode().strip()
+        print(message)
+        print(f"Message from LB: {message}")
+
+        if message.startswith("Connect to:"):
+            game_server_ip = message.replace("Connect to: ", "")
+            _, server = message.split(":", 1)
+            server = server.strip()
+            ip_server, ip_port = server.split(":")
+            print(f"Success! Redirecting player to actual game server: {game_server_ip}")
+            writer.close()
+            await writer.wait_closed()
+            return ip_server, ip_port
+        else:
+            print("Received unexpected response from LB.")
+            return None, None
+
+    except ConnectionRefusedError:
+        print("Error: Could not connect to Load Balancer. Make sure it's running!")
+    except Exception as e:
+        print(f"An error occurred: {e}")
 
 
 async def main():
     configuration = QuicConfiguration(
         is_client=True,
         alpn_protocols=["echo-protocol"],
+        verify_mode=False  # Simplified for your local setup
     )
 
-    configuration.load_verify_locations("../cert.pem")
     print("Connecting to server...")
+    ip, port = await connect_lb()
     async with connect(
-            "10.12.9.203",
-            4433,
+            ip,
+            port,
             configuration=configuration,
             create_protocol=EchoClientProtocol,
     ) as client:
