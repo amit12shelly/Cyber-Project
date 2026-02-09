@@ -1,6 +1,4 @@
 import asyncio
-from time import sleep
-
 from aioquic.asyncio import QuicConnectionProtocol, serve
 from aioquic.quic.configuration import QuicConfiguration
 from aioquic.quic.events import StreamDataReceived, QuicEvent, ConnectionTerminated
@@ -28,6 +26,12 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
             if data_str.startswith("Connected"):
                 # 1. Initialize this player in the master list if they aren't there
+                parts = data_str.split(':')
+                if len(parts) > 1:
+                    state.players_pos[client_id] = parts[1]
+                else:
+                    # Fallback if no position is provided
+                    state.players_pos[client_id] = "0,0"
                 if client_id not in state.players_pos:
                     state.players_pos[client_id] = data_str.split(':')[1]
 
@@ -46,9 +50,11 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 self.broadcast_position(client_id, state.players_pos[client_id], False)
             elif data_str == "Disconnected":
                 client_id = self._quic.host_cid.hex()
+                if client_id in state.players_pos:
+                    del state.players_pos[client_id]  # Remove from tracking
                 if self in state.active_clients:
                     state.active_clients.remove(self)
-                self.broadcast_remove(client_id)  # Tell others to delete the square
+                self.broadcast_remove(client_id)
         elif isinstance(event, ConnectionTerminated):
             print("Client logged out")
 
@@ -88,15 +94,17 @@ async def main():
         configuration=configuration,
         create_protocol=EchoQuicProtocol,
     )
-    asyncio.create_task(checkCPU())
+    asyncio.create_task(check_cpu())
     # Keep the server running
     await asyncio.Future()
 
-async def checkCPU():
+async def check_cpu():
     while True:
         cpu_usage = psutil.cpu_percent(interval=1.0)
         print(cpu_usage)
-        await asyncio.sleep(5)
+
+        await asyncio.sleep(20)
+
 
 if __name__ == "__main__":
     try:

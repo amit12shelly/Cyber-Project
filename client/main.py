@@ -1,15 +1,12 @@
 import asyncio
-from random import randint
-
 import pygame
 from aioquic.asyncio import connect, QuicConnectionProtocol
 from aioquic.quic.configuration import QuicConfiguration
 from aioquic.quic.events import StreamDataReceived, QuicEvent
 
-
 class GameState:
     # Your local position (for prediction/sending)
-    my_pos = [randint(0, 400), randint(0,300)]
+    my_pos = [100, 100]
     # Dictionary of other players: { "client_id": (x, y) }
     other_players = {}
 
@@ -42,7 +39,7 @@ async def run_pygame(client, stream_id):
     pygame.init()
     screen = pygame.display.set_mode((400, 300))
     clock = pygame.time.Clock()
-    client._quic.send_stream_data(stream_id, "Connected pos:{},{}".format(state.my_pos[0], state.my_pos[1]).encode(), end_stream=False)
+    client._quic.send_stream_data(stream_id, b"Connected", end_stream=False)
     client.transmit()
 
     while True:
@@ -50,6 +47,7 @@ async def run_pygame(client, stream_id):
             if event.type == pygame.QUIT:
                 client._quic.send_stream_data(stream_id, b"Disconnected", end_stream=False)
                 client.transmit()
+                pygame.quit()
                 return
 
         # --- Input Handling ---
@@ -88,20 +86,18 @@ async def run_pygame(client, stream_id):
         await asyncio.sleep(0)
         clock.tick(60)
 
-    pygame.quit()
 
 
 async def main():
     configuration = QuicConfiguration(
         is_client=True,
         alpn_protocols=["echo-protocol"],
-        verify_mode=False
+        verify_mode=False  # Simplified for your local setup
     )
 
-    configuration.load_verify_locations("../cert.pem")
     print("Connecting to server...")
     async with connect(
-            "10.12.9.203",
+            "10.12.9.177",
             4433,
             configuration=configuration,
             create_protocol=EchoClientProtocol,
