@@ -1,10 +1,10 @@
 FROM python:3.13-slim
 
-COPY . /server
+COPY . /loadBalncer
 
-WORKDIR /server
+WORKDIR /loadBalncer
 
-EXPOSE 4433/udp
+EXPOSE 4433
 
 RUN pip install aioquic
 

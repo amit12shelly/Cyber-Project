@@ -1,0 +1,11 @@
+version: '3.13'
+
+services:
+  game-server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    ports:
+      - "4433:4433"
+
+    restart: unless-stopped
