@@ -89,7 +89,7 @@ async def run_pygame(client, stream_id):
 
 
 async def connect_lb():
-    lb_host = '10.12.8.142'
+    lb_host = '10.12.8.194'
     lb_port = 8080
     try:
         print(f"Connecting to Load Balancer at {lb_host}:{lb_port}...")
