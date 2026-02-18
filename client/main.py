@@ -89,8 +89,10 @@ async def run_pygame(client, stream_id):
 
 
 async def connect_lb():
-    lb_host = '192.168.224.1'
-    lb_port = 4433
+    with open("lb_info.txt", "r") as file:
+        text = file.read().split("\n")
+    lb_host = text[0]
+    lb_port = int(text[1])
     try:
         print(f"Connecting to Load Balancer at {lb_host}:{lb_port}...")
         reader, writer = await asyncio.open_connection(lb_host, lb_port)
