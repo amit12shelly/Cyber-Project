@@ -6,8 +6,8 @@ class Tile(pygame.sprite.Sprite):
         super().__init__(groups)
 
         # Replace image with a red rectangle
-        self.image = pygame.Surface((64, 64))   # choose any size you want
-        self.image.fill((0, 255, 0))            # red (RGB)
+        self.image = pygame.image.load("img/bush.png").convert_alpha()   # choose any size you want
+        self.image = pygame.transform.scale(self.image,(64, 64))
 
         self.rect = self.image.get_rect(topleft=pos)
         self.hitbox = self.rect.inflate(0, -10)

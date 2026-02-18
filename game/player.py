@@ -1,4 +1,6 @@
 import pygame
+from pygame.examples.cursors import image
+
 from settings import *
 
 class Player(pygame.sprite.Sprite):
@@ -6,11 +8,11 @@ class Player(pygame.sprite.Sprite):
         super().__init__(groups)
 
         # Replace image with a blue rectangle
-        self.image = pygame.Surface((64, 64))
-        self.image.fill((0, 0, 255))
+        self.image =pygame.image.load("img/rigthchar.png").convert_alpha()   # choose any size you want
+        self.image = pygame.transform.scale(self.image,(64, 64))
 
         self.rect = self.image.get_rect(topleft=pos)
-        self.hitbox = self.rect.inflate(0, -26)
+        self.hitbox = self.rect.inflate(0, -45)
 
         self.direction = pygame.math.Vector2()
         self.speed = 5
@@ -21,15 +23,23 @@ class Player(pygame.sprite.Sprite):
         keys = pygame.key.get_pressed()
 
         if keys[pygame.K_w]:
+            self.image=pygame.image.load("img/wchar.png").convert_alpha()
+            self.image = pygame.transform.scale(self.image, (64, 64))
             self.direction.y = -1
         elif keys[pygame.K_s]:
+            self.image = pygame.image.load("img/upchar.png").convert_alpha()
+            self.image = pygame.transform.scale(self.image, (64, 64))
             self.direction.y = 1
         else:
             self.direction.y = 0
 
         if keys[pygame.K_d]:
+            self.image = pygame.image.load("img/rigthchar.png").convert_alpha()
+            self.image = pygame.transform.scale(self.image, (64, 64))
             self.direction.x = 1
         elif keys[pygame.K_a]:
+            self.image = pygame.image.load("img/leftchar.png").convert_alpha()
+            self.image = pygame.transform.scale(self.image, (64, 64))
             self.direction.x = -1
         else:
             self.direction.x = 0
@@ -58,7 +68,7 @@ class Player(pygame.sprite.Sprite):
                 if sprite.hitbox.colliderect(self.hitbox):
                     if self.direction.y > 0:  # moving down
                         self.hitbox.bottom = sprite.hitbox.top
-                    if self.direction.y < 0:  # moving up
+                    if self.direction.y < 0:  # moving   up
                         self.hitbox.top = sprite.hitbox.bottom
 
     def update(self):
