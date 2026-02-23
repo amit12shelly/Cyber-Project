@@ -2,10 +2,9 @@ version: '3.13'
 
 services:
   game-server:
+    network_mode: host
     build:
       context: ./server
       dockerfile: Dockerfile
     ports:
       - "4433:4433/udp"
-    environment:
-      - TARGET_HOST=10.12.8.195
