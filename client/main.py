@@ -1,4 +1,6 @@
 import asyncio
+import socket
+
 import pygame
 from aioquic.asyncio import connect, QuicConnectionProtocol
 from aioquic.quic.configuration import QuicConfiguration
@@ -125,13 +127,45 @@ async def connect_lb():
         print(f"An error occurred: {e}")
 
 
+async def connect_to_ls():
+
+    while True:
+        my_socket = socket.socket()
+        my_socket.connect(("127.0.0.1", 8820))
+
+        command = input("\nSend 'register' to register and 'sign-in' to sign in\n")
+        username = input("Username: ")
+        password = input("password: ")
+
+        if command == "register":
+            info = "reg?u=" + str(username) + "&p=" + str(password)
+            my_socket.send(info.encode())
+
+            data = my_socket.recv(1024).decode()
+            print("The server sent " + data)
+
+        elif command == "sign-in":
+            info = "sign-in?u=" + str(username) + "&p=" + str(password)
+            my_socket.send(info.encode())
+
+            data = my_socket.recv(1024).decode()
+            print("The server sent " + data)
+            d_list = data.split(' ')
+            if d_list[0]=="ok":
+                break
+
+
+        else:
+            continue
+
+
 async def main():
     configuration = QuicConfiguration(
         is_client=True,
         alpn_protocols=["echo-protocol"],
         verify_mode=False  # Simplified for your local setup
     )
-
+    await connect_to_ls()
     print("Connecting to server...")
     ip, port = await connect_lb()
     async with connect(
