@@ -1,16 +1,25 @@
-import socket
-import database
 import asyncio
+import ssl
+import database
+
 
 IP = "0.0.0.0"
 PORT = 8820
 
-LOAD_BALANCER_IP = "0.0.0.0"
-LOAD_BALANCER_PORT = 8080
+
+def get_ssl_context():
+    context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+    try:
+        context.load_cert_chain(certfile="server.crt", keyfile="server.key")
+        return context
+    except FileNotFoundError:
+        print("Error: SSL Certificates (server.crt/key) not found!")
+        return None
+
 
 async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
     addr = writer.get_extra_info("peername")
-    print("Client connected:", addr)
+    print(f"[*] Secure connection from {addr}")
 
     try:
         data = await reader.read(1024)
@@ -18,64 +27,67 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
             return
 
         message = data.decode().strip()
-        print("Received:", message)
+        print(f"[>] Received: {message}")
 
-        if "?" not in message:
-            writer.write(b"invalid format")
-            await writer.drain()
-            return
+        # 1. טיפול בבדיקת חיבור (הלקוח שולח את זה כשלוחצים Enter במסך ה-IP)
+        if message == "CHECK_CONNECTION":
+            reply = "OK"
 
-        command, args = message.split("?", 1)
+        # 2. טיפול בבקשות LOGIN או REGISTER (פורמט הלקוח: TYPE:USER:PASS)
+        elif ":" in message:
+            parts = message.split(":")
+            if len(parts) == 3:
+                request_type, username, password = parts
 
-        # ---------- REGISTER ----------
-        if command == "reg":
-            params = dict(x.split("=") for x in args.split("&"))
-            username = params.get("u")
-            password = params.get("p")
+                if request_type == "REGISTER":
+                    success = database.register(username, password)
+                    reply = "Registration Success" if success else "Username Exists"
 
-            if not username or not password:
-                reply = "missing fields"
+                elif request_type == "LOGIN":
+                    player_id = database.login(username, password)
+                    reply = f"Login Success! ID: {player_id}" if player_id is not None else "Login Failed"
+
+                else:
+                    reply = "Error: Unknown Request"
             else:
-                success = database.register(username, password)
-                reply = "ok" if success else "username exists"
-
-        # ---------- LOGIN ----------
-        elif command == "sign-in":
-            params = dict(x.split("=") for x in args.split("&"))
-            username = params.get("u")
-            password = params.get("p")
-
-            if not username or not password:
-                reply = "missing fields"
-            else:
-                player_id = database.login(username, password)
-                reply = "fail" if player_id is None else "ok id=" + str(player_id)
-
+                reply = "Error: Invalid Format"
         else:
-            reply = "unknown command"
+            reply = "Error: Protocol Mismatch"
 
+        # שליחת התשובה
         writer.write(reply.encode())
         await writer.drain()
+        print(f"[<] Sent to {addr}: {reply}")
 
     except Exception as e:
-        print("Error:", e)
-        writer.write(b"server error")
-        await writer.drain()
-
+        print(f"[!] Error handling {addr}: {e}")
+        try:
+            writer.write(b"Server Error")
+            await writer.drain()
+        except:
+            pass
     finally:
         writer.close()
         await writer.wait_closed()
-        print("Client disconnected:", addr)
+        print(f"[*] Connection closed: {addr}")
 
 
 async def main():
     database.init_db()
 
-    server = await asyncio.start_server(handle_client, IP, PORT)
-    print("Async Login Server running on port", PORT)
+    ssl_context = get_ssl_context()
+    if not ssl_context:
+        return
+
+    server = await asyncio.start_server(
+        handle_client, IP, PORT, ssl=ssl_context
+    )
+
+    print(f"--- Secure Login Server running on {IP}:{PORT} ---")
 
     async with server:
         await server.serve_forever()
+
 
 if __name__ == '__main__':
     asyncio.run(main())
