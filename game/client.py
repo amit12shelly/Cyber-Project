@@ -5,6 +5,7 @@ from aioquic.quic.events import QuicEvent, StreamDataReceived
 from aioquic.quic.configuration import QuicConfiguration
 
 import game_main
+import login_main
 from aioquic.asyncio.client import connect
 from aioquic.quic.configuration import QuicConfiguration
 
@@ -12,7 +13,10 @@ from aioquic.quic.configuration import QuicConfiguration
 configuration = QuicConfiguration(is_client=True)
 global GS_IP
 global GS_PORT
-def login_user(username, password):
+
+
+def login_user():
+    login_main.run_game_client()
     return GS_IP,GS_PORT
 
 
@@ -46,12 +50,8 @@ class GameClientProtocol(QuicConnectionProtocol):
 
 async def main_game_loop():
     global GS_IP, GS_PORT
-    login_port = 8820
-    login_ip = "x.x.x.x"  # login server ip - defined every time by us
-    user_name = "x" #from pygame
-    password = "x"  # from pygame
     print("processing login...")
-    GS_IP, GS_PORT = login_user(user_name , password)
+    GS_IP, GS_PORT = login_user()
     print("connecting...")
     configuration = QuicConfiguration(
         is_client=True,
