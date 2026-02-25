@@ -1,20 +1,52 @@
 import asyncio
 import pygame
-from game_main import Game
+from aioquic.asyncio import QuicConnectionProtocol
+from aioquic.quic.events import QuicEvent, StreamDataReceived
+from aioquic.quic.configuration import QuicConfiguration
+
+import game_main
 from aioquic.asyncio.client import connect
 from aioquic.quic.configuration import QuicConfiguration
 
+
 configuration = QuicConfiguration(is_client=True)
-
-def register_user(username, password):
-    pass
-
-
+global GS_IP
+global GS_PORT
 def login_user(username, password):
+    return GS_IP,GS_PORT
+
+def set_up():
+    pass
+
+async def get_map():
+    pass
+
+async def run_pygame():
+    my_game = game_main.Game()
+    my_game.run()
+
+async def sand_changes_to_game_server():
+    pass
+
+async def update_other_players():
+    pass
+
+async def get_game_server():
     pass
 
 
-async def listen_to_server(reader, game):
+class GameClientProtocol(QuicConnectionProtocol):
+    def quic_event_received(self, event: QuicEvent):
+        if isinstance(event, StreamDataReceived):
+            data = event.data.decode("utf-8")
+            if data.startswith("UPDATE|"):
+                pass
+            elif data.startswith("NEWGS|"):
+                global GS_IP, GS_PORT
+                GS_IP = data.split("|")[1]
+                GS_PORT = data.split("|")[2]
+
+async def listen_to_game_server(reader, game):
     try:
         while True:
             data = await reader.read(1024)
@@ -31,14 +63,30 @@ async def listen_to_server(reader, game):
 
 
 async def main_game_loop():
-    reader, writer = None, None
-
+    global GS_IP, GS_PORT
+    login_port = 8820
+    login_ip = "x.x.x.x"  # login server ip - defined every time by us
+    user_name = "x" #from pygame
+    password = "x"  # from pygame
+    print("processing login...")
+    GS_IP, GS_PORT = login_user(user_name , password)
     print("connecting...")
-    try:
-        async with connect("127.0.0.1", 8820, configuration=configuration) as protocol:
-            stream_id = protocol._quic.get_next_available_stream_id()
-    except Exception:
-        print("Can't connect!")
+    configuration = QuicConfiguration(
+        is_client=True,
+        alpn_protocols=["GameClientProtocol"],
+        verify_mode=False
+    )
+    async with connect(
+            GS_IP,
+            GS_PORT,
+            configuration=configuration,
+            create_protocol=GameClientProtocol,
+    ):
+        await run_pygame()
+    EXIT = False
+    while not EXIT:
+        pass
+
 
 
 if __name__ == "__main__":
