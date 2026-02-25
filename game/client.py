@@ -15,10 +15,8 @@ global GS_PORT
 def login_user(username, password):
     return GS_IP,GS_PORT
 
-def set_up():
-    pass
 
-async def get_map():
+def get_map(map):
     pass
 
 async def run_pygame():
@@ -28,38 +26,22 @@ async def run_pygame():
 async def sand_changes_to_game_server():
     pass
 
-async def update_other_players():
-    pass
-
-async def get_game_server():
-    pass
-
 
 class GameClientProtocol(QuicConnectionProtocol):
     def quic_event_received(self, event: QuicEvent):
         if isinstance(event, StreamDataReceived):
             data = event.data.decode("utf-8")
             if data.startswith("UPDATE|"):
-                pass
+                pass #should call an update function in the pygame file
+                # also should sand the player updates to the gs
+
+            elif data.startswith("SETMAP|"):
+                 get_map(data.split("|")[1])
+
             elif data.startswith("NEWGS|"):
                 global GS_IP, GS_PORT
                 GS_IP = data.split("|")[1]
                 GS_PORT = data.split("|")[2]
-
-async def listen_to_game_server(reader, game):
-    try:
-        while True:
-            data = await reader.read(1024)
-
-            if not data:
-                print("נותק מהשרת")
-                game.running = False
-                break
-
-            game.other_players_data = data.decode()
-
-    except Exception as e:
-        print(f"שגיאת רשת: {e}")
 
 
 async def main_game_loop():
@@ -83,9 +65,6 @@ async def main_game_loop():
             create_protocol=GameClientProtocol,
     ):
         await run_pygame()
-    EXIT = False
-    while not EXIT:
-        pass
 
 
 
