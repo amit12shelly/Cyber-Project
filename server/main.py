@@ -6,6 +6,7 @@ import psutil
 
 class GameState:
     players_pos = {}
+    players_hp = {}
     # Track all active client protocols
     active_clients = set()
 
@@ -26,28 +27,43 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
             if data_str.startswith("Connected"):
                 # 1. Initialize this player in the master list if they aren't there
-                parts = data_str.split(':')
+                parts = data_str.split('|')
                 if len(parts) > 1:
                     state.players_pos[client_id] = parts[1]
+                    state.players_hp[client_id] = parts[2]
                 else:
                     # Fallback if no position is provided
                     state.players_pos[client_id] = "0,0"
+                    state.players_hp[client_id] = 100
                 if client_id not in state.players_pos:
-                    state.players_pos[client_id] = data_str.split(':')[1]
+                    state.players_pos[client_id] = data_str.split('|')[1]
+                    state.players_hp[client_id] = data_str.split('|')[2]
 
                     # 2. Tell the NEW player where EVERYONE ELSE is
                 for other_id, pos in state.players_pos.items():
                     if other_id != client_id:
-                        sync_msg = f"UPDATE|{other_id}|{pos}".encode()
+                        hp = state.players_hp.get(other_id)
+                        sync_msg = f"UPDATE|{other_id}|{pos}|{hp}".encode()
                         self._quic.send_stream_data(0, sync_msg, end_stream=False)
 
                 # 3. Tell EVERYONE ELSE that this new player has joined
-                self.broadcast_position(client_id, state.players_pos[client_id], False)
+                self.broadcast_player(client_id, state.players_pos[client_id],state.players_hp[client_id] , False)
                 self.transmit()
 
-            elif data_str.startswith("moved to:"):
-                state.players_pos[client_id] = data_str.split(":")[1]
-                self.broadcast_position(client_id, state.players_pos[client_id], False)
+            elif data_str.startswith("UPDATE|"): #tell everyone about player that moved
+                new_pos =  data_str.split("|")[1]
+
+                if check_movement(new_pos , state.players_pos[client_id]):
+                    state.players_pos[client_id] = new_pos
+                    #state.players_hp[client_id] = data_str.split("|")[2] #let the player change his hp
+                    self.broadcast_player(client_id, state.players_pos[client_id], state.players_hp[client_id], False)
+
+            elif data_str.startswith("DAMAGE|"):
+                client_id =  data_str.split("|")[1]
+                state.players_hp[client_id] -= data_str.split("|")[2]
+                self.broadcast_player(client_id, state.players_pos[client_id],state.players_hp[client_id] , False)
+
+
             elif data_str == "Disconnected":
                 client_id = self._quic.host_cid.hex()
                 if client_id in state.players_pos:
@@ -64,8 +80,9 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             client._quic.send_stream_data(0, message, end_stream=False)
             client.transmit()
 
-    def broadcast_position(self, sender_id, pos_str, to_yourself):
-        message = f"UPDATE|{sender_id}|{pos_str}".encode("utf-8")
+
+    def broadcast_player(self, sender_id, pos_str , hp, to_yourself):
+        message = f"UPDATE|{sender_id}|{pos_str}|{hp}".encode("utf-8")
 
         for client in state.active_clients:
             # You can skip sending it back to the person who moved if you want:
@@ -74,6 +91,23 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             # Use stream 0 or a dedicated broadcast stream
             client._quic.send_stream_data(0, message, end_stream=False)
             client.transmit()
+
+async def check_damage():
+    pass
+
+async def check_movement(new_pos , old_pos):
+    new_x = new_pos.split(",")[0]
+    new_y = new_pos.split(",")[1]
+    old_x = old_pos.split(",")[0]
+    old_y = old_pos.split(",")[1]
+
+
+    if abs(new_x - old_x) <= 2: #the x movement was less than 3 blocks
+        if abs(new_y - old_y) <= 2:#the y movement was less than 3 blocks
+            return True
+
+
+    return False #the movement isn't correct
 
 async def main():
     # 1. Define the QUIC configuration
