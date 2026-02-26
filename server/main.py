@@ -57,6 +57,8 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                     state.players_pos[client_id] = new_pos
                     #state.players_hp[client_id] = data_str.split("|")[2] #let the player change his hp
                     self.broadcast_player(client_id, state.players_pos[client_id], state.players_hp[client_id], False)
+                else:
+                    self.disconnect() #kick the player
 
             elif data_str.startswith("DAMAGE|"):
                 client_id =  data_str.split("|")[1]
@@ -65,23 +67,18 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
 
             elif data_str == "Disconnected":
-                client_id = self._quic.host_cid.hex()
-                if client_id in state.players_pos:
-                    del state.players_pos[client_id]  # Remove from tracking
-                if self in state.active_clients:
-                    state.active_clients.remove(self)
-                self.broadcast_remove(client_id)
+                self.disconnect()
         elif isinstance(event, ConnectionTerminated):
             print("Client logged out")
 
     def broadcast_remove(self, client_id):
         message = f"REMOVE|{client_id}".encode("utf-8")
-        for client in state.active_clients:
+        for client in list(state.active_clients):
             client._quic.send_stream_data(0, message, end_stream=False)
             client.transmit()
 
 
-    def broadcast_player(self, sender_id, pos_str , hp, to_yourself):
+    def  broadcast_player(self, sender_id, pos_str , hp, to_yourself):
         message = f"UPDATE|{sender_id}|{pos_str}|{hp}".encode("utf-8")
 
         for client in state.active_clients:
@@ -92,22 +89,38 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             client._quic.send_stream_data(0, message, end_stream=False)
             client.transmit()
 
-async def check_damage():
-    pass
-
-async def check_movement(new_pos , old_pos):
-    new_x = new_pos.split(",")[0]
-    new_y = new_pos.split(",")[1]
-    old_x = old_pos.split(",")[0]
-    old_y = old_pos.split(",")[1]
 
 
-    if abs(new_x - old_x) <= 2: #the x movement was less than 3 blocks
-        if abs(new_y - old_y) <= 2:#the y movement was less than 3 blocks
-            return True
+    def disconnect(self):
+        client_id = self._quic.host_cid.hex()
+
+        if client_id in state.players_pos:
+            del state.players_pos[client_id]  # Remove from tracking
+
+        if client_id in state.players_hp:
+            del state.players_hp[client_id]  # Remove from tracking
+
+        if self in state.active_clients:
+            state.active_clients.remove(self)
 
 
-    return False #the movement isn't correct
+        self.broadcast_remove(client_id) #tell everyone about the disconnection
+
+
+
+def check_movement(new_pos , old_pos):
+        new_x = new_pos.split(",")[0]
+        new_y = new_pos.split(",")[1]
+        old_x = old_pos.split(",")[0]
+        old_y = old_pos.split(",")[1]
+
+
+        if abs(new_x - old_x) <= 2: #the x movement was less than 3 blocks
+            if abs(new_y - old_y) <= 2:#the y movement was less than 3 blocks
+                return True
+
+
+        return False #the movement isn't correct
 
 async def main():
     # 1. Define the QUIC configuration
