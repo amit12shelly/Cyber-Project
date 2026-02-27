@@ -78,13 +78,21 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                         "angle": float(data_str.split("|")[2])
                     }
                     print("shoting!")
-                    self.gun_tracking(new_id)
+                    asyncio.create_task(self.gun_tracking(new_id))
 
 
             elif data_str == "Disconnected":
                 self.disconnect()
         elif isinstance(event, ConnectionTerminated):
             print("Client logged out")
+
+    def broadcast_show_bullet(self , pos):
+        message = f"SHOWBULLET|{pos}".encode("utf-8")
+
+        for client in state.active_clients:
+            stream_id = client._quic.get_next_available_stream_id()
+            client._quic.send_stream_data(stream_id, message, end_stream=False)
+            client.transmit()
 
 
     def broadcast_remove(self, client_id):
@@ -124,16 +132,18 @@ class EchoQuicProtocol(QuicConnectionProtocol):
         self.broadcast_remove(client_id) #tell everyone about the disconnection
         print(client_id + " disconnected")
 
-    def gun_tracking(self, bullet_id):
+    async def gun_tracking(self, bullet_id):
 
         x = state.active_bullets[bullet_id]["x"]
         y = state.active_bullets[bullet_id]["y"]
         angle = state.active_bullets[bullet_id]["angle"]
 
-        for i in range (10):
+        for i in range (20):
             x, y = get_next_bullet_position(x,y,angle)
             state.active_bullets[bullet_id]["x"] = x
             state.active_bullets[bullet_id]["y"] = y
+            pos = str(x) + "," + str(y)
+            self.broadcast_show_bullet(pos)
             for player_id, pos_str in state.players_pos.items():
                 player_x = float(pos_str.split(",")[0])
                 player_y = float(pos_str.split(",")[1])
@@ -143,6 +153,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                         del state.active_bullets[bullet_id]
                         self.damage(player_id, 20)
                         return
+            await asyncio.sleep(0.2)
 
 
     def damage(self, client_id, damage):
