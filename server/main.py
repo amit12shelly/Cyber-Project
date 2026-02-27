@@ -90,7 +90,6 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             client.transmit()
 
 
-
     def disconnect(self):
         client_id = self._quic.host_cid.hex()
 
