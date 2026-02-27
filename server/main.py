@@ -31,8 +31,9 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
             if data_str.startswith("Connected"):
                 # 1. Initialize this player in the master list if they aren't there
+                print(client_id + " connected!")
                 parts = data_str.split('|')
-                if len(parts) > 1:
+                if len(parts) > 2:
                     state.players_pos[client_id] = parts[1]
                     state.players_hp[client_id] = parts[2]
                 else:
@@ -59,7 +60,6 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
                 if check_movement(new_pos , state.players_pos[client_id]):
                     state.players_pos[client_id] = new_pos
-                    #state.players_hp[client_id] = data_str.split("|")[2] #let the player change his hp
                     self.broadcast_player(client_id, state.players_pos[client_id], state.players_hp[client_id], False)
                 else:
                     self.disconnect() #kick the player
@@ -69,15 +69,15 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 if weapon == "gun":
                     #set a bullet if
                     new_id = random.randint(1, 1000000)
-                    while new_id not in state.active_bullets:
+                    while new_id in state.active_bullets:
                         new_id = random.randint(1, 1000000)
                     state.active_bullets[new_id] = \
                     {
-                        "x": data_str.split("|")[1].split(",")[0],
-                        "y": data_str.split("|")[1].split(",")[1],
-                        "angle": data_str.split("|")[2]
+                        "x": float(state.players_pos[client_id].split(",")[0]),
+                        "y": float(state.players_pos[client_id].split(",")[1]),
+                        "angle": float(data_str.split("|")[2])
                     }
-
+                    print("shoting!")
                     self.gun_tracking(new_id)
 
 
@@ -87,14 +87,11 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             print("Client logged out")
 
 
-
-
-
-
     def broadcast_remove(self, client_id):
         message = f"REMOVE|{client_id}".encode("utf-8")
         for client in list(state.active_clients):
-            client._quic.send_stream_data(0, message, end_stream=False)
+            stream_id = client._quic.get_next_available_stream_id()
+            client._quic.send_stream_data(stream_id, message, end_stream=False)
             client.transmit()
 
 
@@ -105,9 +102,10 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             # You can skip sending it back to the person who moved if you want:
             if client == self and not to_yourself: continue
 
-            # Use stream 0 or a dedicated broadcast stream
-            client._quic.send_stream_data(0, message, end_stream=False)
+            stream_id = client._quic.get_next_available_stream_id()
+            client._quic.send_stream_data(stream_id, message, end_stream=False)
             client.transmit()
+            print("changed! - " + str(message))
 
 
     def disconnect(self):
@@ -124,28 +122,36 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
 
         self.broadcast_remove(client_id) #tell everyone about the disconnection
+        print(client_id + " disconnected")
 
-    async def gun_tracking(self, bullet_id):
+    def gun_tracking(self, bullet_id):
 
         x = state.active_bullets[bullet_id]["x"]
         y = state.active_bullets[bullet_id]["y"]
         angle = state.active_bullets[bullet_id]["angle"]
 
-        x, y = get_next_bullet_position(x,y,angle)
-        state.active_bullets[bullet_id]["x"] = x
-        state.active_bullets[bullet_id]["y"] = y
-        for player_id, pos_str in state.players_pos.items():
-            player_x = float(pos_str.split(",")[0])
-            player_y = float(pos_str.split(",")[1])
-            if player_x==x and player_y==y:
-                del state.active_bullets[bullet_id]
-                self.damage(20)
-    def damage(self, damage):
-        client_id = self._quic.host_cid.hex()
-        hp = state.players_hp[client_id]
+        for i in range (10):
+            x, y = get_next_bullet_position(x,y,angle)
+            state.active_bullets[bullet_id]["x"] = x
+            state.active_bullets[bullet_id]["y"] = y
+            for player_id, pos_str in state.players_pos.items():
+                player_x = float(pos_str.split(",")[0])
+                player_y = float(pos_str.split(",")[1])
+                if abs(player_x - x) <= 1.0 and abs(player_y - y) <= 1.0:
+
+                    if player_id != self._quic.host_cid.hex():
+                        del state.active_bullets[bullet_id]
+                        self.damage(player_id, 20)
+                        return
+
+
+    def damage(self, client_id, damage):
+        hp = int(state.players_hp[client_id])
         if hp - damage <= 0: #kill player
+            print("player killed!")
             self.broadcast_remove(client_id)
         else: #do the damage to the player
+            print("damage has been done!")
             state.players_hp[client_id] = hp - damage
             self.broadcast_player(client_id ,state.players_pos[client_id], state.players_hp[client_id], True)
 
@@ -166,17 +172,17 @@ def get_next_bullet_position(x, y, angle_degrees): #גמיני הגבר כתב
 
 
 def check_movement(new_pos , old_pos):
-        new_x = new_pos.split(",")[0]
-        new_y = new_pos.split(",")[1]
-        old_x = old_pos.split(",")[0]
-        old_y = old_pos.split(",")[1]
+        new_x = float(new_pos.split(",")[0])
+        new_y = float(new_pos.split(",")[1])
+        old_x = float(old_pos.split(",")[0])
+        old_y = float(old_pos.split(",")[1])
 
 
         if abs(new_x - old_x) <= 2: #the x movement was less than 3 blocks
             if abs(new_y - old_y) <= 2:#the y movement was less than 3 blocks
                 return True
 
-
+        print("player has been kicked!")
         return False #the movement isn't correct
 
 async def main():
@@ -188,7 +194,7 @@ async def main():
     )
 
     # 2. Load the SSL certificate and private key
-    #configuration.load_cert_chain("../cert.pem", "key.pem")
+    configuration.load_cert_chain("cert.pem", "key.pem")
 
     # 3. Start the server
     print("Starting QUIC server on udp:0.0.0.0:4433")
