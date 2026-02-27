@@ -51,14 +51,14 @@ class GameClientProtocol(QuicConnectionProtocol):
                 player_id =  data.split("|")[1]
                 player_pos = data.split("|")[2]
                 player_hp = data.split("|")[3]
-                #update_player = update_player.Game() #call a function that doesn't exist right now
+                #update_player = update_player.Game(player_id, player_pos , player_hp) #call a function that doesn't exist right now
                 #update_player.run(player_id , player_pos , player_hp)
 
 
             elif data.startswith("REMOVE|"):
                 player_id =  data.split("|")[1]
                 #remove_player = remove_player_player.Game() #call a function that doesn't exist right now
-                #remove_player_player.run(player_id , player_pos , player_hp)
+                #remove_player.run(player_id , player_pos , player_hp)
 
 
 async def main_game_loop():
