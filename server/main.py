@@ -3,12 +3,16 @@ from aioquic.asyncio import QuicConnectionProtocol, serve
 from aioquic.quic.configuration import QuicConfiguration
 from aioquic.quic.events import StreamDataReceived, QuicEvent, ConnectionTerminated
 import psutil
+import math
+import random
 
 class GameState:
     players_pos = {}
     players_hp = {}
     # Track all active client protocols
     active_clients = set()
+
+    active_bullets = {}
 
 
 state = GameState()
@@ -60,16 +64,32 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 else:
                     self.disconnect() #kick the player
 
-            elif data_str.startswith("DAMAGE|"):
-                client_id =  data_str.split("|")[1]
-                state.players_hp[client_id] -= data_str.split("|")[2]
-                self.broadcast_player(client_id, state.players_pos[client_id],state.players_hp[client_id] , False)
+            elif data_str.startswith("ATTACK|"):
+                weapon =  data_str.split("|")[1]
+                if weapon == "gun":
+                    #set a bullet if
+                    new_id = random.randint(1, 1000000)
+                    while new_id not in state.active_bullets:
+                        new_id = random.randint(1, 1000000)
+                    state.active_bullets[new_id] = \
+                    {
+                        "x": data_str.split("|")[1].split(",")[0],
+                        "y": data_str.split("|")[1].split(",")[1],
+                        "angle": data_str.split("|")[2]
+                    }
+
+                    self.gun_tracking(new_id)
 
 
             elif data_str == "Disconnected":
                 self.disconnect()
         elif isinstance(event, ConnectionTerminated):
             print("Client logged out")
+
+
+
+
+
 
     def broadcast_remove(self, client_id):
         message = f"REMOVE|{client_id}".encode("utf-8")
@@ -105,6 +125,44 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
         self.broadcast_remove(client_id) #tell everyone about the disconnection
 
+    async def gun_tracking(self, bullet_id):
+
+        x = state.active_bullets[bullet_id]["x"]
+        y = state.active_bullets[bullet_id]["y"]
+        angle = state.active_bullets[bullet_id]["angle"]
+
+        x, y = get_next_bullet_position(x,y,angle)
+        state.active_bullets[bullet_id]["x"] = x
+        state.active_bullets[bullet_id]["y"] = y
+        for player_id, pos_str in state.players_pos.items():
+            player_x = float(pos_str.split(",")[0])
+            player_y = float(pos_str.split(",")[1])
+            if player_x==x and player_y==y:
+                del state.active_bullets[bullet_id]
+                self.damage(20)
+    def damage(self, damage):
+        client_id = self._quic.host_cid.hex()
+        hp = state.players_hp[client_id]
+        if hp - damage <= 0: #kill player
+            self.broadcast_remove(client_id)
+        else: #do the damage to the player
+            state.players_hp[client_id] = hp - damage
+            self.broadcast_player(client_id ,state.players_pos[client_id], state.players_hp[client_id], True)
+
+
+def get_next_bullet_position(x, y, angle_degrees): #גמיני הגבר כתב
+    # 1. המרה של הזווית ממעלות לרדיאנים (כי ככה פייתון עובד)
+    angle_rad = math.radians(angle_degrees)
+
+    # 2. חישוב כמה הכדור צריך לזוז בכל ציר
+    delta_x = math.cos(angle_rad)
+    delta_y = math.sin(angle_rad)
+
+    # 3. חיבור התזוזה למיקום הנוכחי
+    new_x = x + delta_x
+    new_y = y + delta_y
+
+    return new_x, new_y
 
 
 def check_movement(new_pos , old_pos):
@@ -130,7 +188,7 @@ async def main():
     )
 
     # 2. Load the SSL certificate and private key
-    configuration.load_cert_chain("../cert.pem", "key.pem")
+    #configuration.load_cert_chain("../cert.pem", "key.pem")
 
     # 3. Start the server
     print("Starting QUIC server on udp:0.0.0.0:4433")
