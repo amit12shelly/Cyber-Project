@@ -1,5 +1,13 @@
 import asyncio
 
+# Shared state of your game servers
+server_pool = {
+    "server_1": {"ip": "127.0.0.1", "cpu": 60.2, "port": 4433},
+    "server_2": {"ip": "127.0.0.1", "cpu": 50.4, "port": 4433},
+    "server_3": {"ip": "127.0.0.1", "cpu": 95.8, "port": 4433},
+    "server_4": {"ip": "127.0.0.1", "cpu": 12.4, "port": 4433},
+}
+
 servers = [{"ip": "127.0.0.1", "cpu": 12.4, "port": 4433, "area": {"t-l": [0,22], "b-r": [8,100]}}, {"ip": "127.0.0.1", "cpu": 12.4, "port": 8000, "area": {"t-l": [0,22], "b-r": [8,100]}}]
 
 width, height = 100, 100
