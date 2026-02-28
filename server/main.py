@@ -154,6 +154,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                         self.damage(player_id, 20)
                         return
             await asyncio.sleep(0.2)
+        del state.active_bullets[bullet_id]
 
 
     def damage(self, client_id, damage):
