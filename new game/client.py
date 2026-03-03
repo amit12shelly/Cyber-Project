@@ -23,23 +23,26 @@ async def quic_network_loop():
     )
 
     async with connect(SERVER_IP, SERVER_PORT, configuration=config) as client:
-        stream = client.create_stream(is_unidirectional=False)
+        # 1. נוסיף await ונפצל לשני אובייקטים (קורא וכותב)
+        stream_reader, stream_writer = await client.create_stream(is_unidirectional=False)
 
-        async def reader():
+        async def read_from_server():
             while True:
-                data = await stream.receive()
+                # 2. נשתמש ב-read עם גודל מקסימלי (למשל 4096 בתים)
+                data = await stream_reader.read(4096)
                 if not data:
                     break
                 incoming_messages.put(data.decode("utf-8"))
 
-        async def writer():
+        async def write_to_server():
             loop = asyncio.get_event_loop()
             while True:
                 msg = await loop.run_in_executor(None, outgoing_messages.get)
-                stream.send(msg.encode("utf-8"))
+                # 3. נשתמש ב-write כדי לשלוח את המידע
+                stream_writer.write(msg.encode("utf-8"))
 
-        await asyncio.gather(reader(), writer())
-
+        # שיניתי את השמות של הפונקציות כדי למנוע בלבול
+        await asyncio.gather(read_from_server(), write_to_server())
 
 def start_quic_thread():
     loop = asyncio.new_event_loop()
