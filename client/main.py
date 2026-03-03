@@ -93,7 +93,7 @@ async def connect_lb():
         text = file.read().split("\n")
     lb_host = text[0]
     lb_port = int(text[1])"""
-    lb_host = "10.88.162.14"
+    lb_host = "127.0.0.1"
     lb_port = 8080
     try:
         print(f"Connecting to Load Balancer at {lb_host}:{lb_port}...")
