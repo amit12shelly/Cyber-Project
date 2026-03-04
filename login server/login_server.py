@@ -1,10 +1,38 @@
 import asyncio
 import ssl
+import json
 import database
 
 
 IP = "127.0.0.1"
 PORT = 8820
+
+LOAD_BALANCER_IP = "127.0.0.1"
+LOAD_BALANCER_PORT = 8080
+
+
+async def get_game_server_from_lb(x, y):
+    """
+    מתחבר ל-Load Balancer, שולח קואורדינטות ומקבל פרטי שרת משחק.
+    """
+    try:
+        reader, writer = await asyncio.open_connection(LOAD_BALANCER_IP, LOAD_BALANCER_PORT)
+
+        request = json.dumps({"x": x, "y": y})
+        writer.write(request.encode())
+        await writer.drain()
+
+        data = await reader.read(1024)
+        writer.close()
+        await writer.wait_closed()
+
+        if data:
+            return json.loads(data.decode())
+        return None
+
+    except Exception as e:
+        print(f"[!] Failed to connect to Load Balancer: {e}")
+        return None
 
 
 def get_ssl_context():
@@ -41,18 +69,39 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
 
                 if request_type == "REGISTER":
                     success = database.register(username, password)
-                    reply = "Registration Success" if success else "Username Exists"
+                    reply = json.dumps({"status": "success", "message": "Registration Success"}) if success \
+                        else json.dumps({"status": "error", "message": "Username Exists"})
 
                 elif request_type == "LOGIN":
                     player_id = database.login(username, password)
-                    reply = f"Login Success! ID: {player_id}" if player_id is not None else "Login Failed"
+
+                    if player_id is not None:
+                        # 1. טעינת נתוני מיקום
+                        player_data = database.load_player(player_id)
+                        x, y = player_data['x'], player_data['y']
+
+                        # 2. פנייה ל-Load Balancer
+                        print(f"[?] Querying LB for player {username} at ({x}, {y})...")
+                        game_server_info = await get_game_server_from_lb(x, y)
+
+                        if game_server_info:
+                            # 3. תשובת הצלחה מלאה
+                            reply = json.dumps({
+                                "status": "success",
+                                "player_id": player_id,
+                                "server_ip": game_server_info["ip"],
+                                "server_port": game_server_info["port"],
+                                "zone": game_server_info.get("zone", "Unknown")
+                            })
+                        else:
+                            reply = json.dumps({"status": "error", "message": "Load Balancer Unavailable"})
+                    else:
+                        reply = json.dumps({"status": "error", "message": "Login Failed"})
 
                 else:
-                    reply = "Error: Unknown Request"
+                    reply = json.dumps({"status": "error", "message": "Unknown Request"})
             else:
-                reply = "Error: Invalid Format"
-        else:
-            reply = "Error: Protocol Mismatch"
+                reply = json.dumps({"status": "error", "message": "Invalid Format"})
 
         # שליחת התשובה
         writer.write(reply.encode())

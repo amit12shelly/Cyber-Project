@@ -1,6 +1,7 @@
 import sqlite3
 import hashlib
 import time
+import secrets
 from typing import Optional, Dict, Any
 
 # =========================
@@ -58,46 +59,46 @@ def init_db():
     # ---------------- Players Table ----------------
     # Stores login credentials and persistent player data
     cur.execute("""
-    CREATE TABLE IF NOT EXISTS players (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT UNIQUE NOT NULL,
-        password_hash TEXT NOT NULL,
-        level INTEGER DEFAULT 1,
-        exp INTEGER DEFAULT 0,
-        gold INTEGER DEFAULT 0,
-        created_at INTEGER
-    )
-    """)
+        CREATE TABLE IF NOT EXISTS players (
+            id INTEGER PRIMARY KEY, 
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            level INTEGER DEFAULT 1,
+            exp INTEGER DEFAULT 0,
+            gold INTEGER DEFAULT 0,
+            created_at INTEGER
+        )
+        """)
 
     # ---------------- Characters Table ----------------
     # Stores the in-game character state for each player
     # One character per player (player_id is UNIQUE)
     cur.execute("""
-    CREATE TABLE IF NOT EXISTS characters (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        player_id INTEGER UNIQUE,
-        x INTEGER DEFAULT 0,
-        y INTEGER DEFAULT 0,
-        hp INTEGER DEFAULT 100,
-        mp INTEGER DEFAULT 50,
-        last_save INTEGER,
-        FOREIGN KEY(player_id) REFERENCES players(id)
-    )
-    """)
+        CREATE TABLE IF NOT EXISTS characters (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            player_id INTEGER UNIQUE,
+            x INTEGER DEFAULT 0,
+            y INTEGER DEFAULT 0,
+            hp INTEGER DEFAULT 100,
+            mp INTEGER DEFAULT 50,
+            last_save INTEGER,
+            FOREIGN KEY(player_id) REFERENCES players(id)
+        )
+        """)
 
     # ---------------- Inventory Table ----------------
     # Stores all items owned by a player
     cur.execute("""
-    CREATE TABLE IF NOT EXISTS inventory (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        player_id INTEGER NOT NULL,
-        slot INTEGER NOT NULL CHECK(slot >= 0 AND slot < 10),
-        item_name TEXT,
-        amount INTEGER DEFAULT 0,
-        FOREIGN KEY(player_id) REFERENCES players(id),
-        UNIQUE(player_id, slot)
-    );
-    """)
+        CREATE TABLE IF NOT EXISTS inventory (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            player_id INTEGER NOT NULL,
+            slot INTEGER NOT NULL CHECK(slot >= 0 AND slot < 10),
+            item_name TEXT,
+            amount INTEGER DEFAULT 0,
+            FOREIGN KEY(player_id) REFERENCES players(id),
+            UNIQUE(player_id, slot)
+        );
+        """)
 
     conn.commit()
     conn.close()
@@ -121,31 +122,32 @@ def init_db():
 # - False -> username already exists
 # ==================================================
 def register(username: str, password: str) -> bool:
+    conn = get_conn()
     try:
-        conn = get_conn()
         cur = conn.cursor()
+        random_id = secrets.randbits(31)
 
-        # Insert new player
+        # הכנסת השחקן עם ה-ID הרנדומלי
         cur.execute(
-            "INSERT INTO players (username, password_hash, created_at) VALUES (?, ?, ?)",
-            (username, hash_password(password), int(time.time()))
+            "INSERT INTO players (id, username, password_hash, created_at) VALUES (?, ?, ?, ?)",
+            (random_id, username, hash_password(password), int(time.time()))
         )
 
-        player_id = cur.lastrowid
-
-        # Create default character for the player
         cur.execute(
             "INSERT INTO characters (player_id, last_save) VALUES (?, ?)",
-            (player_id, int(time.time()))
+            (random_id, int(time.time()))
         )
 
         conn.commit()
-        conn.close()
         return True
 
     except sqlite3.IntegrityError:
-        # Triggered when username already exists
+        # קורה אם שם המשתמש תפוס או (בסיכוי אפסי) שה-ID הרנדומלי כבר קיים
         return False
+    finally:
+        # סגירה אחת ב-finally מבטיחה שהחיבור ייסגר בכל מקרה
+        conn.close()
+
 
 
 # ==================================================
