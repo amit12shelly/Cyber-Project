@@ -1,18 +1,18 @@
 import asyncio
+import math
+import random
+import psutil
+
 from aioquic.asyncio import QuicConnectionProtocol, serve
 from aioquic.quic.configuration import QuicConfiguration
 from aioquic.quic.events import StreamDataReceived, QuicEvent, ConnectionTerminated
-import psutil
-import math
-import random
+
 
 class GameState:
-    players_pos = {}
-    players_hp = {}
-    # Track all active client protocols
-    active_clients = set()
-
-    active_bullets = {}
+    players_pos = {}        # client_id -> "x,y"
+    players_hp = {}         # client_id -> hp
+    active_clients = set()  # set of EchoQuicProtocol
+    active_bullets = {}     # bullet_id -> {x, y, angle}
 
 
 state = GameState()
@@ -21,211 +21,227 @@ state = GameState()
 class EchoQuicProtocol(QuicConnectionProtocol):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Add this client to the set when they connect
         state.active_clients.add(self)
+        self.stream_id = None
+        self.recv_buffer = ""  # for newline-delimited messages
 
     def quic_event_received(self, event: QuicEvent) -> None:
         if isinstance(event, StreamDataReceived):
-            data_str = event.data.decode("utf-8")
-            client_id = self._quic.host_cid.hex()
+            if self.stream_id is None:
+                self.stream_id = event.stream_id
 
-            if data_str.startswith("Connected"):
-                # 1. Initialize this player in the master list if they aren't there
-                print(client_id + " connected!")
-                parts = data_str.split('|')
-                if len(parts) > 2:
-                    state.players_pos[client_id] = parts[1]
-                    state.players_hp[client_id] = parts[2]
-                else:
-                    # Fallback if no position is provided
-                    state.players_pos[client_id] = "0,0"
-                    state.players_hp[client_id] = 100
-                if client_id not in state.players_pos:
-                    state.players_pos[client_id] = data_str.split('|')[1]
-                    state.players_hp[client_id] = data_str.split('|')[2]
+            self.recv_buffer += event.data.decode("utf-8")
 
-                    # 2. Tell the NEW player where EVERYONE ELSE is
-                for other_id, pos in state.players_pos.items():
-                    if other_id != client_id:
-                        hp = state.players_hp.get(other_id)
-                        sync_msg = f"UPDATE|{other_id}|{pos}|{hp}".encode()
-                        self._quic.send_stream_data(0, sync_msg, end_stream=False)
+            while "\n" in self.recv_buffer:
+                line, self.recv_buffer = self.recv_buffer.split("\n", 1)
+                line = line.strip()
+                if line:
+                    self.handle_message(line)
 
-                # 3. Tell EVERYONE ELSE that this new player has joined
-                self.broadcast_player(client_id, state.players_pos[client_id],state.players_hp[client_id] , False)
-                self.transmit()
-
-            elif data_str.startswith("UPDATE|"): #tell everyone about player that moved
-                new_pos =  data_str.split("|")[1]
-
-                if check_movement(new_pos , state.players_pos[client_id]):
-                    state.players_pos[client_id] = new_pos
-                    self.broadcast_player(client_id, state.players_pos[client_id], state.players_hp[client_id], False)
-                else:
-                    self.disconnect() #kick the player
-
-            elif data_str.startswith("ATTACK|"):
-                weapon =  data_str.split("|")[1]
-                if weapon == "gun":
-                    #set a bullet if
-                    new_id = random.randint(1, 1000000)
-                    while new_id in state.active_bullets:
-                        new_id = random.randint(1, 1000000)
-                    state.active_bullets[new_id] = \
-                    {
-                        "x": float(state.players_pos[client_id].split(",")[0]),
-                        "y": float(state.players_pos[client_id].split(",")[1]),
-                        "angle": float(data_str.split("|")[2])
-                    }
-                    print("shoting!")
-                    asyncio.create_task(self.gun_tracking(new_id))
-
-
-            elif data_str == "Disconnected":
-                self.disconnect()
         elif isinstance(event, ConnectionTerminated):
             print("Client logged out")
+            self.disconnect()
 
-    def broadcast_show_bullet(self , pos):
-        message = f"SHOWBULLET|{pos}".encode("utf-8")
+    def handle_message(self, data_str: str):
+        client_id = self._quic.host_cid.hex()
 
-        for client in state.active_clients:
-            stream_id = client._quic.get_next_available_stream_id()
-            client._quic.send_stream_data(stream_id, message, end_stream=False)
-            client.transmit()
+        # CONNECTED
+        if data_str.startswith("Connected"):
+            print(client_id, "connected!")
+            parts = data_str.split("|")
 
+            if len(parts) >= 3:
+                state.players_pos[client_id] = parts[1]
+                state.players_hp[client_id] = parts[2]
+            else:
+                state.players_pos[client_id] = "0,0"
+                state.players_hp[client_id] = "100"
 
-    def broadcast_remove(self, client_id):
-        message = f"REMOVE|{client_id}".encode("utf-8")
+            # send existing players to new player
+            for other_id, pos in state.players_pos.items():
+                if other_id == client_id:
+                    continue
+                hp = state.players_hp.get(other_id, "100")
+                msg = f"UPDATE|{other_id}|{pos}|{hp}\n".encode()
+                if self.stream_id is not None:
+                    self._quic.send_stream_data(self.stream_id, msg, end_stream=False)
+
+            # tell others about new player
+            self.broadcast_player(client_id, state.players_pos[client_id], state.players_hp[client_id], False)
+            self.transmit()
+
+        # MOVEMENT
+        elif data_str.startswith("UPDATE|"):
+            parts = data_str.split("|")
+            if len(parts) < 2:
+                return
+            new_pos = parts[1]
+
+            if client_id not in state.players_pos:
+                return
+
+            if check_movement(new_pos, state.players_pos[client_id]):
+                state.players_pos[client_id] = new_pos
+                self.broadcast_player(client_id, new_pos, state.players_hp[client_id], False)
+            else:
+                self.disconnect()
+
+        # ATTACK
+        elif data_str.startswith("ATTACK|"):
+            parts = data_str.split("|")
+            if len(parts) < 3:
+                return
+            weapon = parts[1]
+            if weapon == "gun":
+                new_id = random.randint(1, 1000000)
+                while new_id in state.active_bullets:
+                    new_id = random.randint(1, 1000000)
+
+                pos_str = state.players_pos.get(client_id, "0,0")
+                x_str, y_str = pos_str.split(",")
+                angle = float(parts[2])
+
+                state.active_bullets[new_id] = {
+                    "x": float(x_str),
+                    "y": float(y_str),
+                    "angle": angle,
+                }
+
+                print("shooting!")
+                asyncio.create_task(self.gun_tracking(new_id))
+
+        # DISCONNECT
+        elif data_str == "Disconnected":
+            self.disconnect()
+
+    # ---------- Broadcast helpers ---------- #
+
+    def broadcast_show_bullet(self, pos: str):
+        msg = f"SHOWBULLET|{pos}\n".encode()
         for client in list(state.active_clients):
-            stream_id = client._quic.get_next_available_stream_id()
-            client._quic.send_stream_data(stream_id, message, end_stream=False)
+            if client.stream_id is None:
+                continue
+            client._quic.send_stream_data(client.stream_id, msg, end_stream=False)
             client.transmit()
 
-
-    def  broadcast_player(self, sender_id, pos_str , hp, to_yourself):
-        message = f"UPDATE|{sender_id}|{pos_str}|{hp}".encode("utf-8")
-
-        for client in state.active_clients:
-            # You can skip sending it back to the person who moved if you want:
-            if client == self and not to_yourself: continue
-
-            stream_id = client._quic.get_next_available_stream_id()
-            client._quic.send_stream_data(stream_id, message, end_stream=False)
+    def broadcast_remove(self, client_id: str):
+        msg = f"REMOVE|{client_id}\n".encode()
+        for client in list(state.active_clients):
+            if client.stream_id is None:
+                continue
+            client._quic.send_stream_data(client.stream_id, msg, end_stream=False)
             client.transmit()
-            print("changed! - " + str(message))
 
+    def broadcast_player(self, sender_id: str, pos_str: str, hp, to_yourself: bool):
+        msg = f"UPDATE|{sender_id}|{pos_str}|{hp}\n".encode()
+        for client in list(state.active_clients):
+            if client == self and not to_yourself:
+                continue
+            if client.stream_id is None:
+                continue
+            client._quic.send_stream_data(client.stream_id, msg, end_stream=False)
+            client.transmit()
+        print("changed! -", msg)
+
+    # ---------- Game logic ---------- #
 
     def disconnect(self):
         client_id = self._quic.host_cid.hex()
 
         if client_id in state.players_pos:
-            del state.players_pos[client_id]  # Remove from tracking
-
+            del state.players_pos[client_id]
         if client_id in state.players_hp:
-            del state.players_hp[client_id]  # Remove from tracking
-
+            del state.players_hp[client_id]
         if self in state.active_clients:
             state.active_clients.remove(self)
 
+        self.broadcast_remove(client_id)
+        print(client_id, "disconnected")
 
-        self.broadcast_remove(client_id) #tell everyone about the disconnection
-        print(client_id + " disconnected")
-
-    async def gun_tracking(self, bullet_id):
+    async def gun_tracking(self, bullet_id: int):
+        if bullet_id not in state.active_bullets:
+            return
 
         x = state.active_bullets[bullet_id]["x"]
         y = state.active_bullets[bullet_id]["y"]
         angle = state.active_bullets[bullet_id]["angle"]
 
-        for i in range (20):
-            x, y = get_next_bullet_position(x,y,angle)
+        for _ in range(20):
+            x, y = get_next_bullet_position(x, y, angle)
             state.active_bullets[bullet_id]["x"] = x
             state.active_bullets[bullet_id]["y"] = y
-            pos = str(x) + "," + str(y)
-            self.broadcast_show_bullet(pos)
-            for player_id, pos_str in state.players_pos.items():
-                player_x = float(pos_str.split(",")[0])
-                player_y = float(pos_str.split(",")[1])
-                if abs(player_x - x) <= 1.0 and abs(player_y - y) <= 1.0:
 
+            pos = f"{x},{y}"
+            self.broadcast_show_bullet(pos)
+
+            for player_id, pos_str in list(state.players_pos.items()):
+                px, py = map(float, pos_str.split(","))
+                if abs(px - x) <= 1.0 and abs(py - y) <= 1.0:
                     if player_id != self._quic.host_cid.hex():
                         del state.active_bullets[bullet_id]
                         self.damage(player_id, 20)
                         return
+
             await asyncio.sleep(0.2)
-        del state.active_bullets[bullet_id]
 
+        if bullet_id in state.active_bullets:
+            del state.active_bullets[bullet_id]
 
-    def damage(self, client_id, damage):
-        hp = int(state.players_hp[client_id])
-        if hp - damage <= 0: #kill player
+    def damage(self, client_id: str, damage: int):
+        hp = int(state.players_hp.get(client_id, "100"))
+        if hp - damage <= 0:
             print("player killed!")
             self.broadcast_remove(client_id)
-        else: #do the damage to the player
-            print("damage has been done!")
+        else:
             state.players_hp[client_id] = hp - damage
-            self.broadcast_player(client_id ,state.players_pos[client_id], state.players_hp[client_id], True)
+            self.broadcast_player(client_id, state.players_pos[client_id], state.players_hp[client_id], True)
 
 
-def get_next_bullet_position(x, y, angle_degrees): #גמיני הגבר כתב
-    # 1. המרה של הזווית ממעלות לרדיאנים (כי ככה פייתון עובד)
+# ---------- Utils ---------- #
+
+def get_next_bullet_position(x, y, angle_degrees):
     angle_rad = math.radians(angle_degrees)
-
-    # 2. חישוב כמה הכדור צריך לזוז בכל ציר
-    delta_x = math.cos(angle_rad)
-    delta_y = math.sin(angle_rad)
-
-    # 3. חיבור התזוזה למיקום הנוכחי
-    new_x = x + delta_x
-    new_y = y + delta_y
-
-    return new_x, new_y
+    return x + math.cos(angle_rad), y + math.sin(angle_rad)
 
 
-def check_movement(new_pos , old_pos):
-        new_x = float(new_pos.split(",")[0])
-        new_y = float(new_pos.split(",")[1])
-        old_x = float(old_pos.split(",")[0])
-        old_y = float(old_pos.split(",")[1])
+def check_movement(new_pos, old_pos):
+    new_x, new_y = map(float, new_pos.split(","))
+    old_x, old_y = map(float, old_pos.split(","))
+
+    if abs(new_x - old_x) <= 8 and abs(new_y - old_y) <= 8:
+        return True
+
+    print("player has been kicked!")
+    return False
 
 
-        if abs(new_x - old_x) <= 2: #the x movement was less than 3 blocks
-            if abs(new_y - old_y) <= 2:#the y movement was less than 3 blocks
-                return True
+# ---------- Server entry ---------- #
 
-        print("player has been kicked!")
-        return False #the movement isn't correct
+async def check_cpu():
+    while True:
+        print("CPU:", psutil.cpu_percent(interval=1.0))
+        await asyncio.sleep(20)
+
 
 async def main():
-    # 1. Define the QUIC configuration
-    configuration = QuicConfiguration(
+    config = QuicConfiguration(
         is_client=False,
-        alpn_protocols=["echo-protocol"],# Custom protocol name
-        verify_mode = False,
+        alpn_protocols=["echo-protocol"],
+        verify_mode=False,
     )
 
-    # 2. Load the SSL certificate and private key
-    configuration.load_cert_chain("cert.pem", "key.pem")
+    config.load_cert_chain("cert.pem", "key.pem")
 
-    # 3. Start the server
     print("Starting QUIC server on udp:0.0.0.0:4433")
     await serve(
         host="0.0.0.0",
         port=4433,
-        configuration=configuration,
+        configuration=config,
         create_protocol=EchoQuicProtocol,
     )
+
     asyncio.create_task(check_cpu())
-    # Keep the server running
     await asyncio.Future()
-
-async def check_cpu():
-    while True:
-        cpu_usage = psutil.cpu_percent(interval=1.0)
-        print(cpu_usage)
-
-        await asyncio.sleep(20)
 
 
 if __name__ == "__main__":
