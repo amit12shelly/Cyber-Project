@@ -46,6 +46,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
         client_id = self._quic.host_cid.hex()
 
         # CONNECTED
+        print(data_str)
         if data_str.startswith("Connected"):
             print(client_id, "connected!")
             parts = data_str.split("|")
@@ -129,11 +130,13 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
     def broadcast_remove(self, client_id: str):
         msg = f"REMOVE|{client_id}\n".encode()
+        print("sent remove!")
         for client in list(state.active_clients):
             if client.stream_id is None:
                 continue
             client._quic.send_stream_data(client.stream_id, msg, end_stream=False)
             client.transmit()
+
 
     def broadcast_player(self, sender_id: str, pos_str: str, hp, to_yourself: bool):
         msg = f"UPDATE|{sender_id}|{pos_str}|{hp}\n".encode()

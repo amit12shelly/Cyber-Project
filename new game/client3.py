@@ -275,6 +275,7 @@ class Player:
             outgoing_messages.put(f"UPDATE|{self.x},{self.y}")
         # --- Auto-walk wandering ---
         if self.auto_walk and not moved:
+            outgoing_messages.put(f"UPDATE|{self.x},{self.y}")
             if self.wander_timer <= 0:
                 self.pick_random_direction()
 
@@ -313,6 +314,8 @@ class Player:
         for i in range(bar_width):
             color = (0, 255, 0) if i < self.hp else (255, 0, 0)
             pygame.draw.line(screen, color, (bar_x + i, bar_y), (bar_x + i, bar_y + bar_height))
+
+
 class RemotePlayer:
     def __init__(self, x, y, hp, sprites):
         self.x = x
@@ -370,6 +373,7 @@ def main():
     player = Player(128, 128)
     start_quic_thread()
     outgoing_messages.put(f"Connected|{player.x},{player.y}|{player.hp}")
+    outgoing_messages.put(f"UPDATE|{player.x},{player.y}")
 
     # --- LOAD LOOT IMAGES ---
     gun1_img = pygame.transform.scale(
@@ -393,6 +397,7 @@ def main():
     while running:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
+                outgoing_messages.put(f"Disconnected")
                 running = False
 
             if event.type == pygame.KEYDOWN:
@@ -447,12 +452,15 @@ def main():
 
                 if player_id not in remote_players:
                     remote_players[player_id] = RemotePlayer(x, y, hp, player.base_sprites)
+                    outgoing_messages.put(f"UPDATE|{player.x},{player.y}")
                 else:
                     remote_players[player_id].update_from_server(x, y, hp)
 
             elif parts[0] == "REMOVE":
+                print("good1")
                 if len(parts) < 2:
                     continue
+                print("good2")
                 player_id = parts[1]
                 if player_id in remote_players:
                     del remote_players[player_id]
