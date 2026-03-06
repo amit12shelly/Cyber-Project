@@ -7,12 +7,34 @@ from aioquic.asyncio import QuicConnectionProtocol, serve
 from aioquic.quic.configuration import QuicConfiguration
 from aioquic.quic.events import StreamDataReceived, QuicEvent, ConnectionTerminated
 
+#----------server settings----------
+INVENTORY_SIZE = 5
+WEAPON_LIST = ["gun"]
+MAX_BULLETS = 1000
+TOLERANCE = 2.0
+BULLETS_MOVE_TIME = 0.2
+
+
+
+
+
+def load_map():
+    with open("map.txt", "r") as f:
+        lines = f.readlines()
+    return [list(line.strip()) for line in lines]
+
 
 class GameState:
-    players_pos = {}        # client_id -> "x,y"
-    players_hp = {}         # client_id -> hp
+    #player info
+    players_pos = {}  # client_id -> "x,y"
+    players_hp = {}  # client_id -> hp
+    players_inventory = {}  # client_id -> {slot 1, slot 2, slot 3 ,slot 4 ,slot 5}
     active_clients = set()  # set of EchoQuicProtocol
-    active_bullets = {}     # bullet_id -> {x, y, angle}
+    active_bullets = {}  # bullet_id -> {x, y, angle}
+
+    #game info
+    map_weapons = {}  # weapon_id -> {x, y, type}
+    game_map = load_map()
 
 
 state = GameState()
@@ -49,14 +71,10 @@ class EchoQuicProtocol(QuicConnectionProtocol):
         print(data_str)
         if data_str.startswith("Connected"):
             print(client_id, "connected!")
-            parts = data_str.split("|")
 
-            if len(parts) >= 3:
-                state.players_pos[client_id] = parts[1]
-                state.players_hp[client_id] = parts[2]
-            else:
-                state.players_pos[client_id] = "0,0"
-                state.players_hp[client_id] = "100"
+            state.players_pos[client_id] = "0,0"
+            state.players_hp[client_id] = "100"
+            state.players_inventory[client_id] = {str(i): "none" for i in range(INVENTORY_SIZE)}
 
             id_msg = f"{client_id}".encode()
             self._quic.send_stream_data(0, id_msg, end_stream=False)
@@ -67,6 +85,12 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                     continue
                 hp = state.players_hp.get(other_id, "100")
                 msg = f"UPDATE|{other_id}|{pos}|{hp}\n".encode()
+                if self.stream_id is not None:
+                    self._quic.send_stream_data(self.stream_id, msg, end_stream=False)
+
+            #send all the weapons positions
+            for weapon_id, pos_x , pos_y , type_str in state.map_weapons.items():
+                msg = f"DROPPED|{pos_x},{pos_y}|{type_str}\n".encode()
                 if self.stream_id is not None:
                     self._quic.send_stream_data(self.stream_id, msg, end_stream=False)
 
@@ -88,7 +112,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 state.players_pos[client_id] = new_pos
                 self.broadcast_player(client_id, new_pos, state.players_hp[client_id], False)
             else:
-                self.disconnect()
+                self.disconnect() #kick the player
 
         # ATTACK
         elif data_str.startswith("ATTACK|"):
@@ -97,9 +121,9 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 return
             weapon = parts[1]
             if weapon == "gun":
-                new_id = random.randint(1, 1000000)
+                new_id = random.randint(1, MAX_BULLETS)
                 while new_id in state.active_bullets:
-                    new_id = random.randint(1, 1000000)
+                    new_id = random.randint(1, MAX_BULLETS)
 
                 pos_str = state.players_pos.get(client_id, "0,0")
                 x_str, y_str = pos_str.split(",")
@@ -114,11 +138,88 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 print("shooting!")
                 asyncio.create_task(self.gun_tracking(new_id))
 
+        elif data_str.startswith("PICKUP|"):
+            parts = data_str.split("|")
+            if len(parts) < 3:
+                return
+            pickup_pos = data_str.split("|")[1]
+            pickup_type = data_str.split("|")[2]
+
+            px = pickup_pos.split(",")[0]
+            py = pickup_pos.split(",")[1]
+
+            found_weapon_id = None
+            if pickup_type in WEAPON_LIST:
+
+                for w_id, w_data in state.map_weapons.items():  #checks if this weapon in real
+                    if w_data["type"] == pickup_type:
+                        if abs(w_data["x"] - px) <= TOLERANCE and abs(w_data["y"] - py) <= TOLERANCE:
+                            found_weapon_id = w_id
+                            break
+
+                if found_weapon_id is not None:  #if its real
+                    for slot in range(INVENTORY_SIZE):
+                        if state.players_inventory[client_id].get(slot) == "none":
+                            state.players_inventory[client_id][slot] = pickup_type
+                            del state.map_weapons[found_weapon_id]
+                            break
+
+
+
+            else: #this weapon does not exist
+                self.disconnect()  # kick the player
+
+        elif data_str.startswith("DROP|"):
+            parts = data_str.split("|")
+            if len(parts) < 4:
+                return
+            pos_str = data_str.split("|")[1]
+            x_str = pos_str.split(",")[0]
+            y_str = pos_str.split(",")[1]
+            weapon_slot = data_str.split("|")[3]
+            drop = state.players_inventory[client_id].get(weapon_slot)
+            if drop in WEAPON_LIST:
+                if drop != "none":  #if he has something to drop
+
+                    state.players_inventory[client_id][
+                        weapon_slot] = "none"  #removing the weapon from the player inventory
+
+                    new_id = random.randint(1, 1000000)
+                    while new_id in state.map_weapons:
+                        new_id = random.randint(1, 1000000)
+
+                    state.map_weapons[new_id] = {  #drop this weapon
+                        "x": float(x_str),
+                        "y": float(y_str),
+                        "type": drop,
+                    }
+
+                    #tell everyone about this drop
+                    self.broadcast_drop(pos_str, drop)
+
+                else:  #he wants to drop something that he doesn't have
+                    self.disconnect()  # kick the player
+
+            else:  #he wants to drop something that the server don't recognize
+
+                self.disconnect()  #kick the player
+
         # DISCONNECT
         elif data_str == "Disconnected":
             self.disconnect()
 
     # ---------- Broadcast helpers ---------- #
+
+    def broadcast_drop(self, pos_str, type_str):
+        msg = f"DROPPED|{pos_str}|{type_str}\n".encode()
+        for client in list(state.active_clients):
+            if client == self:
+                continue
+            if client.stream_id is None:
+                continue
+            client._quic.send_stream_data(client.stream_id, msg, end_stream=False)
+            client.transmit()
+        print(msg)
 
     def broadcast_show_bullet(self, pos: str):
         msg = f"SHOWBULLET|{pos}\n".encode()
@@ -136,7 +237,6 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 continue
             client._quic.send_stream_data(client.stream_id, msg, end_stream=False)
             client.transmit()
-
 
     def broadcast_player(self, sender_id: str, pos_str: str, hp, to_yourself: bool):
         msg = f"UPDATE|{sender_id}|{pos_str}|{hp}\n".encode()
@@ -182,13 +282,13 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
             for player_id, pos_str in list(state.players_pos.items()):
                 px, py = map(float, pos_str.split(","))
-                if abs(px - x) <= 1.0 and abs(py - y) <= 1.0:
+                if abs(px - x) <= TOLERANCE and abs(py - y) <= TOLERANCE:
                     if player_id != self._quic.host_cid.hex():
                         del state.active_bullets[bullet_id]
                         self.damage(player_id, 20)
                         return
 
-            await asyncio.sleep(0.2)
+                await asyncio.sleep(BULLETS_MOVE_TIME)
 
         if bullet_id in state.active_bullets:
             del state.active_bullets[bullet_id]
@@ -213,12 +313,55 @@ def get_next_bullet_position(x, y, angle_degrees):
 def check_movement(new_pos, old_pos):
     new_x, new_y = map(float, new_pos.split(","))
     old_x, old_y = map(float, old_pos.split(","))
+    if state.game_map[int(new_y / 4)][int(new_x / 4)] == "." :
+        if abs(new_x - old_x) <= 8 and abs(new_y - old_y) <= 8:
+            return True
 
-    if abs(new_x - old_x) <= 8 and abs(new_y - old_y) <= 8:
-        return True
-
-    print("player has been kicked!")
     return False
+
+
+def spawn_random_weapons(amount): #גמיני המלך כתב
+    """
+    מפזרת נשקים רנדומליים על המפה בשקט (בלי לשדר לקליינטים).
+    מיועד להפעלה בתחילת המשחק או ברקע.
+    """
+    tiles_high = len(state.game_map)
+    tiles_wide = len(state.game_map[0])
+
+    spawned = 0
+    attempts = 0  # מונע לולאה אינסופית אם בטעות המפה מלאה בקירות
+
+    while spawned < amount and attempts < amount * 10:
+        attempts += 1
+
+        # מגרילים משבצת במפה
+        tile_x = random.randint(0, tiles_wide - 1)
+        tile_y = random.randint(0, tiles_high - 1)
+
+        # בודקים אם יש שם רצפה (ולא קיר)
+        if state.game_map[tile_y][tile_x] == ".":
+            # ממירים את המשבצת לפיקסלים (כמו שהקליינט עושה)
+            pixel_x = float(tile_x * 64)
+            pixel_y = float(tile_y * 64)
+
+            # יוצרים ID ייחודי
+            new_id = random.randint(1, 1000000)
+            while new_id in state.map_weapons:
+                new_id = random.randint(1, 1000000)
+
+            # בוחרים נשק רנדומלי מהרשימה המותרת
+            weapon_type = random.choice(WEAPON_LIST)
+
+            # מוסיפים בשקט למאגר של השרת
+            state.map_weapons[new_id] = {
+                "x": pixel_x,
+                "y": pixel_y,
+                "type": weapon_type
+            }
+
+            spawned += 1
+
+    print(f"Server initialized with {spawned} weapons on the map.")
 
 
 # ---------- Server entry ---------- #
@@ -251,6 +394,7 @@ async def main():
 
 
 if __name__ == "__main__":
+    spawn_random_weapons(50)
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
