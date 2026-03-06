@@ -9,15 +9,17 @@ from aioquic.quic.events import StreamDataReceived, QuicEvent, ConnectionTermina
 
 #----------server settings----------
 INVENTORY_SIZE = 5
-WEAPON_LIST = ["gun"]
+WEAPON_LIST = [["gun", 20, 20]] #-> name,damage,range
+WEAPON_NAMES = [w[0] for w in WEAPON_LIST]
+WEAPON_DAMAGE = [w[1] for w in WEAPON_LIST]
+WEAPON_RANGE = [w[2] for w in WEAPON_LIST]
 MAX_BULLETS = 1000
-TOLERANCE = 2.0
+TILE_SIZE = 64
+TOLERANCE = TILE_SIZE / 2
 BULLETS_MOVE_TIME = 0.2
 DROPPED_WEAPONS = 50
 MONSTERS_AMOUNT = 100
-TILE_SIZE = 4
-GUN_RANGE = 20
-GUN_DAMAGE = 20
+
 
 
 
@@ -81,7 +83,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
             state.players_pos[client_id] = "0,0"
             state.players_hp[client_id] = "100"
-            state.players_inventory[client_id] = {str(i): "none" for i in range(INVENTORY_SIZE)}
+            state.players_inventory[client_id] = {int(i): "none" for i in range(INVENTORY_SIZE)}
 
             id_msg = f"{client_id}".encode()
             self._quic.send_stream_data(0, id_msg, end_stream=False)
@@ -96,8 +98,8 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                     self._quic.send_stream_data(self.stream_id, msg, end_stream=False)
 
             #send all the weapons positions
-            for weapon_id, pos_x , pos_y , type_str in state.map_weapons.items():
-                msg = f"DROPPED|{pos_x},{pos_y}|{type_str}\n".encode()
+            for weapon_id, w_data in state.map_weapons.items():
+                msg = f"DROPPED|{w_data['x']},{w_data['y']}|{w_data['type']}\n".encode()
                 if self.stream_id is not None:
                     self._quic.send_stream_data(self.stream_id, msg, end_stream=False)
 
@@ -127,7 +129,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             if len(parts) < 3:
                 return
             weapon = parts[1]
-            if weapon == "gun":
+            if weapon in WEAPON_NAMES:
                 new_id = random.randint(1, MAX_BULLETS)
                 while new_id in state.active_bullets:
                     new_id = random.randint(1, MAX_BULLETS)
@@ -143,7 +145,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 }
 
                 print("shooting!")
-                asyncio.create_task(self.gun_tracking(new_id))
+                asyncio.create_task(self.gun_tracking(new_id, weapon))
 
         elif data_str.startswith("PICKUP|"):
             parts = data_str.split("|")
@@ -152,11 +154,11 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             pickup_pos = data_str.split("|")[1]
             pickup_type = data_str.split("|")[2]
 
-            px = pickup_pos.split(",")[0]
-            py = pickup_pos.split(",")[1]
+            px = float(pickup_pos.split(",")[0])
+            py = float(pickup_pos.split(",")[1])
 
             found_weapon_id = None
-            if pickup_type in WEAPON_LIST:
+            if pickup_type in WEAPON_NAMES:
 
                 for w_id, w_data in state.map_weapons.items():  #checks if this weapon in real
                     if w_data["type"] == pickup_type:
@@ -178,14 +180,14 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
         elif data_str.startswith("DROP|"):
             parts = data_str.split("|")
-            if len(parts) < 4:
+            if len(parts) < 3:
                 return
             pos_str = data_str.split("|")[1]
             x_str = pos_str.split(",")[0]
             y_str = pos_str.split(",")[1]
             weapon_slot = data_str.split("|")[2]
             drop = state.players_inventory[client_id].get(weapon_slot)
-            if drop in WEAPON_LIST:
+            if drop in WEAPON_NAMES:
                 if drop != "none":  #if he has something to drop
 
                     state.players_inventory[client_id][
@@ -271,26 +273,34 @@ class EchoQuicProtocol(QuicConnectionProtocol):
         self.broadcast_remove(client_id)
         print(client_id, "disconnected")
 
-    async def gun_tracking(self, bullet_id: int):
+    async def gun_tracking(self, bullet_id: int ,gun_type):
         if bullet_id not in state.active_bullets:
             return
 
         x = state.active_bullets[bullet_id]["x"]
         y = state.active_bullets[bullet_id]["y"]
         angle = state.active_bullets[bullet_id]["angle"]
+        gun_range = 0
+        gun_damage = 0
+        for i in range (len(WEAPON_NAMES)):
+            if WEAPON_NAMES[i] == gun_type:
+                gun_damage = int(WEAPON_DAMAGE[i])
+                gun_range = int(WEAPON_RANGE[i])
 
-        for _ in range(GUN_RANGE):
+
+        for _ in range(gun_range):
             x, y = get_next_bullet_position(x, y, angle)
             state.active_bullets[bullet_id]["x"] = x
             state.active_bullets[bullet_id]["y"] = y
 
             pos = f"{x},{y}"
-            if state.game_map[int(x / TILE_SIZE)][int(y / TILE_SIZE)] == "#": #checks if the bullet got into wall
+            if not check_if_in_map(x, y): #checks if the bullet got out of the map
                 del state.active_bullets[bullet_id]
                 return
-            if check_if_in_map(x, y): #checks if the bullet got out of the map
+            if state.game_map[int(y / TILE_SIZE)][int(x / TILE_SIZE)] == "#": #checks if the bullet got into wall
                 del state.active_bullets[bullet_id]
                 return
+
 
             self.broadcast_show_bullet(pos)
 
@@ -300,7 +310,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 if abs(px - x) <= TOLERANCE and abs(py - y) <= TOLERANCE:
                     if player_id != self._quic.host_cid.hex():
                         del state.active_bullets[bullet_id]
-                        self.damage(player_id, GUN_DAMAGE)
+                        self.damage(player_id, gun_damage)
                         return
 
 
@@ -312,10 +322,13 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             del state.active_bullets[bullet_id]
 
     def damage(self, client_id: str, damage: int):
-        hp = int(state.players_hp.get(client_id, "100"))
+        hp = int(state.players_hp.get(client_id))
         if hp - damage <= 0:
             print("player killed!")
             self.broadcast_remove(client_id)
+            state.players_pos[client_id] = "0,0"
+            state.players_hp[client_id] = "100"
+            self.broadcast_player(client_id, state.players_pos[client_id], state.players_hp[client_id], True)
         else:
             state.players_hp[client_id] = hp - damage
             self.broadcast_player(client_id, state.players_pos[client_id], state.players_hp[client_id], True)
@@ -323,11 +336,13 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
 # ---------- Utils ---------- #
 def check_if_in_map(x, y):
-    if y > len(state.game_map):
+    x = int(float(x)/ TILE_SIZE)
+    y = int(float(y) / TILE_SIZE)
+    if y >= len(state.game_map):
         return False
     elif y < 0:
         return False
-    elif x > len(state.game_map[0]):
+    elif x >= len(state.game_map[0]):
         return False
     elif x < 0:
         return False
@@ -346,9 +361,9 @@ def get_next_bullet_position(x, y, angle_degrees):
 def check_movement(new_pos, old_pos):
     new_x, new_y = map(float, new_pos.split(","))
     old_x, old_y = map(float, old_pos.split(","))
-    if state.game_map[int(new_y / TILE_SIZE)][int(new_x / TILE_SIZE)] == "." :
-        if abs(new_x - old_x) <= 8 and abs(new_y - old_y) <= 8:
-            if check_if_in_map(new_x, new_y):
+    if check_if_in_map(new_x, new_y):
+        if state.game_map[int(new_y / TILE_SIZE)][int(new_x / TILE_SIZE)] == "." :
+            if abs(new_x - old_x) <= 8 and abs(new_y - old_y) <= 8:
                 return True
 
     return False
@@ -387,7 +402,10 @@ def spawn_random_monsters(amount):
 
             spawned += 1
 
-    print(f"Server initialized with {spawned} weapons on the map.")
+    print(f"Server initialized with {spawned} monsters on the map.")
+
+
+
 def spawn_random_weapons(amount): #גמיני המלך כתב
     """
     מפזרת נשקים רנדומליים על המפה בשקט (בלי לשדר לקליינטים).
@@ -418,7 +436,7 @@ def spawn_random_weapons(amount): #גמיני המלך כתב
                 new_id = random.randint(1, 1000000)
 
             # בוחרים נשק רנדומלי מהרשימה המותרת
-            weapon_type = random.choice(WEAPON_LIST)
+            weapon_type = random.choice(WEAPON_NAMES)
 
             # מוסיפים בשקט למאגר של השרת
             state.map_weapons[new_id] = {
