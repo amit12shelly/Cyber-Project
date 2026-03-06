@@ -13,7 +13,11 @@ WEAPON_LIST = ["gun"]
 MAX_BULLETS = 1000
 TOLERANCE = 2.0
 BULLETS_MOVE_TIME = 0.2
-
+DROPPED_WEAPONS = 50
+MONSTERS_AMOUNT = 100
+TILE_SIZE = 4
+GUN_RANGE = 20
+GUN_DAMAGE = 20
 
 
 
@@ -35,6 +39,9 @@ class GameState:
     #game info
     map_weapons = {}  # weapon_id -> {x, y, type}
     game_map = load_map()
+
+    #monsters info
+    monsters = {} #monster_id -> {x, y, hp}
 
 
 state = GameState()
@@ -176,7 +183,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             pos_str = data_str.split("|")[1]
             x_str = pos_str.split(",")[0]
             y_str = pos_str.split(",")[1]
-            weapon_slot = data_str.split("|")[3]
+            weapon_slot = data_str.split("|")[2]
             drop = state.players_inventory[client_id].get(weapon_slot)
             if drop in WEAPON_LIST:
                 if drop != "none":  #if he has something to drop
@@ -272,7 +279,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
         y = state.active_bullets[bullet_id]["y"]
         angle = state.active_bullets[bullet_id]["angle"]
 
-        for _ in range(20):
+        for _ in range(GUN_RANGE):
             x, y = get_next_bullet_position(x, y, angle)
             state.active_bullets[bullet_id]["x"] = x
             state.active_bullets[bullet_id]["y"] = y
@@ -285,10 +292,14 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 if abs(px - x) <= TOLERANCE and abs(py - y) <= TOLERANCE:
                     if player_id != self._quic.host_cid.hex():
                         del state.active_bullets[bullet_id]
-                        self.damage(player_id, 20)
+                        self.damage(player_id, GUN_DAMAGE)
                         return
+                if state.game_map[int(py / TILE_SIZE)][int(px / TILE_SIZE)] == "#":
+                    del state.active_bullets[bullet_id]
+                    return
 
-                await asyncio.sleep(BULLETS_MOVE_TIME)
+
+            await asyncio.sleep(BULLETS_MOVE_TIME)
 
         if bullet_id in state.active_bullets:
             del state.active_bullets[bullet_id]
@@ -313,13 +324,47 @@ def get_next_bullet_position(x, y, angle_degrees):
 def check_movement(new_pos, old_pos):
     new_x, new_y = map(float, new_pos.split(","))
     old_x, old_y = map(float, old_pos.split(","))
-    if state.game_map[int(new_y / 4)][int(new_x / 4)] == "." :
+    if state.game_map[int(new_y / TILE_SIZE)][int(new_x / TILE_SIZE)] == "." :
         if abs(new_x - old_x) <= 8 and abs(new_y - old_y) <= 8:
             return True
 
     return False
 
+def spawn_random_monsters(amount):
 
+    tiles_high = len(state.game_map)
+    tiles_wide = len(state.game_map[0])
+
+    spawned = 0
+
+    while spawned < amount:
+
+
+        tile_x = random.randint(0, tiles_wide - 1)
+        tile_y = random.randint(0, tiles_high - 1)
+
+
+        if state.game_map[tile_y][tile_x] == ".":
+
+            pixel_x = float(tile_x * TILE_SIZE)
+            pixel_y = float(tile_y * TILE_SIZE)
+
+
+            new_id = random.randint(1, 1000000)
+            while new_id in state.monsters:
+                new_id = random.randint(1, 1000000)
+
+
+
+            state.monsters[new_id] = {
+                "x": pixel_x,
+                "y": pixel_y,
+                "hp": 100
+            }
+
+            spawned += 1
+
+    print(f"Server initialized with {spawned} weapons on the map.")
 def spawn_random_weapons(amount): #גמיני המלך כתב
     """
     מפזרת נשקים רנדומליים על המפה בשקט (בלי לשדר לקליינטים).
@@ -341,8 +386,8 @@ def spawn_random_weapons(amount): #גמיני המלך כתב
         # בודקים אם יש שם רצפה (ולא קיר)
         if state.game_map[tile_y][tile_x] == ".":
             # ממירים את המשבצת לפיקסלים (כמו שהקליינט עושה)
-            pixel_x = float(tile_x * 64)
-            pixel_y = float(tile_y * 64)
+            pixel_x = float(tile_x * TILE_SIZE)
+            pixel_y = float(tile_y * TILE_SIZE)
 
             # יוצרים ID ייחודי
             new_id = random.randint(1, 1000000)
@@ -394,7 +439,8 @@ async def main():
 
 
 if __name__ == "__main__":
-    spawn_random_weapons(50)
+    spawn_random_weapons(DROPPED_WEAPONS)
+    spawn_random_monsters(MONSTERS_AMOUNT)
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
