@@ -9,7 +9,7 @@ from aioquic.quic.configuration import QuicConfiguration
 
 SERVER_IP = "127.0.0.1"
 SERVER_PORT = 4433
-
+TOLERANCE = 5
 incoming_messages = Queue()
 outgoing_messages = Queue()
 
@@ -410,7 +410,8 @@ def main():
                     nearby = get_nearby_item(player, loot_items)
                     if nearby:
                         player.pick_item(nearby)  # מוסיף ל־Inventory
-                        loot_items.remove(nearby)  # מסיר מהמפה
+                        loot_items.remove(nearby)
+                        outgoing_messages.put(f"PICKUP|{nearby.x},{nearby.y}|{nearby.name}")
                 if event.key == pygame.K_q:
                     gun_slot = player.drop_selected_weapon()
                     if gun_slot:
@@ -482,6 +483,19 @@ def main():
                 else:
                     continue
                 loot_items.append(Item(x_dropped,y_dropped,img,"weapon",type_dropped))
+            elif parts[0] == "UNDROPPED":
+                if len(parts) < 3:
+                    continue
+                x_pick, y_pick = parts[1].split(",")
+                x_pick = float(x_pick)
+                y_pick = float(y_pick)
+                type_pick = parts[2]
+
+                for item in loot_items:
+                    if item.x==x_pick and item.y == y_pick and item.name == type_pick:
+                        loot_items.remove(item)
+                        break
+
 
 
         # --- CAMERA FOLLOWS PLAYER ---

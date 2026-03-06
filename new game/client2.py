@@ -9,7 +9,7 @@ from aioquic.quic.configuration import QuicConfiguration
 
 SERVER_IP = "127.0.0.1"
 SERVER_PORT = 4433
-
+TOLERANCE = 5
 incoming_messages = Queue()
 outgoing_messages = Queue()
 
@@ -358,7 +358,7 @@ class RemotePlayer:
 
 def main():
     pygame.init()
-    screen = pygame.display.set_mode((0,0),pygame.FULLSCREEN)
+    screen = pygame.display.set_mode((1280, 720))
     pygame.display.set_caption("Game")
     clock = pygame.time.Clock()
 
@@ -389,9 +389,10 @@ def main():
         ("weapon", "shotGun", gun2_img),
     ]
 
-    loot_items = spawn_loot_per_camera_zone(game_map, tile_size, loot_pool, screen.get_width(), screen.get_height(),per_zone=1)
-    print("Loot spawned:", len(loot_items))
-    print("First loot at:", loot_items[0].x, loot_items[0].y)
+    # loot_items = spawn_loot_per_camera_zone(game_map, tile_size, loot_pool, screen.get_width(), screen.get_height(),per_zone=1)
+    loot_items = []
+    # print("Loot spawned:", len(loot_items))
+    # print("First loot at:", loot_items[0].x, loot_items[0].y)
 
     running = True
     while running:
@@ -409,7 +410,8 @@ def main():
                     nearby = get_nearby_item(player, loot_items)
                     if nearby:
                         player.pick_item(nearby)  # מוסיף ל־Inventory
-                        loot_items.remove(nearby)  # מסיר מהמפה
+                        loot_items.remove(nearby)
+                        outgoing_messages.put(f"PICKUP|{nearby.x},{nearby.y}|{nearby.name}")
                 if event.key == pygame.K_q:
                     gun_slot = player.drop_selected_weapon()
                     if gun_slot:
@@ -439,6 +441,7 @@ def main():
 
         while not incoming_messages.empty():
             msg = incoming_messages.get()
+            print(msg)
             parts = msg.split("|")
             if not parts:
                 continue
@@ -464,6 +467,38 @@ def main():
                 player_id = parts[1]
                 if player_id in remote_players:
                     del remote_players[player_id]
+            elif parts[0] == "DROPPED":
+                if len(parts) < 3:
+                    continue
+                x_dropped, y_dropped = parts[1].split(",")
+                x_dropped = float(x_dropped)
+                y_dropped = float(y_dropped)
+                type_dropped = parts[2]
+                if type_dropped == "rifle":
+                    img = pygame.image.load("img/leftWeapon1.png")
+                    img = pygame.transform.scale(img, (64, 64))
+                elif type_dropped == "gun":
+                    img = pygame.image.load("img/rightWeapon1.png")
+                    img = pygame.transform.scale(img, (64, 64))
+                else:
+                    continue
+                loot_items.append(Item(x_dropped,y_dropped,img,"weapon",type_dropped))
+            elif parts[0] == "UNDROPPED":
+                if len(parts) < 3:
+                    continue
+                x_pick, y_pick = parts[1].split(",")
+                x_pick = float(x_pick)
+                y_pick = float(y_pick)
+                type_pick = parts[2]
+
+                for item in loot_items:
+                    if item.x==x_pick and item.y == y_pick and item.name == type_pick:
+                        loot_items.remove(item)
+                        break
+
+
+
+
 
         # --- CAMERA FOLLOWS PLAYER ---
         camera_x = player.x - screen.get_width() // 2

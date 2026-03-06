@@ -208,7 +208,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             pos_str = data_str.split("|")[1]
             x_str = pos_str.split(",")[0]
             y_str = pos_str.split(",")[1]
-            weapon_slot = data_str.split("|")[2]
+            weapon_slot = int(parts[2])
             drop = state.players_inventory[self._quic.host_cid.hex()].get(weapon_slot)
             if drop in WEAPON_NAMES:
 
