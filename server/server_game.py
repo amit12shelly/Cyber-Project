@@ -367,13 +367,27 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             while dropped < AMOUNT_TO_DROP_IN_DEATH or inv_slot < INVENTORY_SIZE:
                 item = state.players_inventory[self._quic.host_cid.hex()].get(inv_slot)
                 if item != "none":
+                    new_id = random.randint(1, 1000000)
+                    while new_id in state.map_weapons:
+                        new_id = random.randint(1, 1000000)
+                    state.map_weapons[new_id] = {
+                        "x": float(pos.split(","[0])),
+                        "y": float(pos.split(","[1])),
+                        "type": item,
+                    }
                     self.broadcast_drop(pos, item)
                     dropped += 1
+                inv_slot += 1
 
-            print("player killed!")
+
+            inv_slot = 1
+            while inv_slot < INVENTORY_SIZE:
+                state.players_inventory[client_id][inv_slot] = "none"
+
             self.broadcast_remove(client_id)
             state.players_pos[client_id] = "0,0"
             state.players_hp[client_id] = "100"
+            print("player killed!")
             self.broadcast_player(client_id, state.players_pos[client_id], state.players_hp[client_id], True)
         else:
             state.players_hp[client_id] = hp - damage
