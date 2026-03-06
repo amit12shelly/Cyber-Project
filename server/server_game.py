@@ -177,7 +177,8 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                     for slot in range(INVENTORY_SIZE):
                         if state.players_inventory[self._quic.host_cid.hex()].get(slot) == "none":
                             state.players_inventory[self._quic.host_cid.hex()][slot] = pickup_type
-                            self.broadcast_undrop(state.map_weapons[found_weapon_id])
+                            pos_str = f"{state.map_weapons[found_weapon_id]['x']},{state.map_weapons[found_weapon_id]['y']}"
+                            self.broadcast_undrop(pos_str , state.map_weapons[found_weapon_id]["type"])
                             del state.map_weapons[found_weapon_id]
                             break
 
