@@ -79,9 +79,14 @@ class EchoQuicProtocol(QuicConnectionProtocol):
         print(data_str)
         if data_str.startswith("Connected"):
             print(client_id, "connected!")
+            parts = data_str.split("|")
+            if len(parts) < 3:
+                state.players_pos[client_id] = "0,0"
+                state.players_hp[client_id] = "100"
+            else:
+                state.players_pos[client_id] = parts[1]
+                state.players_hp[client_id] = parts[2]
 
-            state.players_pos[client_id] = "0,0"
-            state.players_hp[client_id] = "100"
             state.players_inventory[client_id] = {int(i): "none" for i in range(INVENTORY_SIZE)}
 
             id_msg = f"{client_id}".encode()
