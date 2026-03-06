@@ -17,9 +17,10 @@ MAX_BULLETS = 1000
 TILE_SIZE = 64
 TOLERANCE = TILE_SIZE / 2
 BULLETS_MOVE_TIME = 0.2
-DROPPED_WEAPONS = 6000
 MONSTERS_AMOUNT = 100
-
+SCREEN_WIDTH = 1920
+SCREEN_HEIGHT = 1080
+MAX_WEAPONS = 500
 
 def load_map():
     with open("map.txt", "r") as f:
@@ -113,6 +114,12 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
             if client_id not in state.players_pos:
                 return
+            for other_id, other_pos in list(state.players_pos.items()):
+                if other_id == self._quic.host_cid.hex():
+                    continue
+                if other_pos == new_pos:
+                    self.disconnect()  # kick the player
+                    break
 
             if check_movement(new_pos, state.players_pos[client_id]):
                 state.players_pos[client_id] = new_pos
@@ -144,71 +151,88 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 print("shooting!")
                 asyncio.create_task(self.gun_tracking(new_id, weapon))
 
+
         elif data_str.startswith("PICKUP|"):
             parts = data_str.split("|")
+
             if len(parts) < 3:
                 return
+
             pickup_pos = data_str.split("|")[1]
             pickup_type = data_str.split("|")[2]
-
             px = float(pickup_pos.split(",")[0])
             py = float(pickup_pos.split(",")[1])
-
             found_weapon_id = None
-            if pickup_type in WEAPON_NAMES:
 
-                for w_id, w_data in state.map_weapons.items():  #checks if this weapon in real
+            if pickup_type in WEAPON_NAMES:
+                for w_id, w_data in state.map_weapons.items():  # checks if this weapon in real
                     if w_data["type"] == pickup_type:
                         if abs(w_data["x"] - px) <= TOLERANCE and abs(w_data["y"] - py) <= TOLERANCE:
                             found_weapon_id = w_id
                             break
 
-                if found_weapon_id is not None:  #if its real
+                if found_weapon_id is not None:  # if its real
+
                     for slot in range(INVENTORY_SIZE):
-                        if state.players_inventory[client_id].get(slot) == "none":
-                            state.players_inventory[client_id][slot] = pickup_type
+
+                        if state.players_inventory[self._quic.host_cid.hex()].get(slot) == "none":
+                            state.players_inventory[self._quic.host_cid.hex()][slot] = pickup_type
+                            pos_str = f"{state.map_weapons[found_weapon_id]['x']},{state.map_weapons[found_weapon_id]['y']}"
+                            self.broadcast_undrop(pos_str, state.map_weapons[found_weapon_id]["type"])
                             del state.map_weapons[found_weapon_id]
                             break
 
+                else:  # this weapon does not exist
+                    self.disconnect()  # kick the player
 
-
-            else:  #this weapon does not exist
+            else:  # this weapon does not exist
                 self.disconnect()  # kick the player
+
+
 
         elif data_str.startswith("DROP|"):
             parts = data_str.split("|")
+
             if len(parts) < 3:
                 return
             pos_str = data_str.split("|")[1]
             x_str = pos_str.split(",")[0]
             y_str = pos_str.split(",")[1]
             weapon_slot = data_str.split("|")[2]
-            drop = state.players_inventory[client_id].get(weapon_slot)
+            drop = state.players_inventory[self._quic.host_cid.hex()].get(weapon_slot)
             if drop in WEAPON_NAMES:
-                if drop != "none":  #if he has something to drop
 
-                    state.players_inventory[client_id][
-                        weapon_slot] = "none"  #removing the weapon from the player inventory
+                if drop != "none":  # if he has something to drop
+                    state.players_inventory[self._quic.host_cid.hex()][weapon_slot] = "none"  # removing the weapon from the player inventory
 
                     new_id = random.randint(1, 1000000)
                     while new_id in state.map_weapons:
                         new_id = random.randint(1, 1000000)
 
-                    state.map_weapons[new_id] = {  #drop this weapon
+                    state.map_weapons[new_id] = {  # drop this weapon
                         "x": float(x_str),
                         "y": float(y_str),
                         "type": drop,
                     }
-
-                    #tell everyone about this drop
+                    # tell everyone about this drop
                     self.broadcast_drop(pos_str, drop)
 
-                else:  #he wants to drop something that he doesn't have
+                else:  # he wants to drop something that he doesn't have
                     self.disconnect()  # kick the player
 
-            else:  #he wants to drop something that the server don't recognize
+            else:  # he wants to drop something that the server don't recognize
+                self.disconnect()  # kick the player
 
-                self.disconnect()  #kick the player
+
+        elif data_str.startswith("CHAT|"):
+            parts = data_str.split("|")
+            if len(parts) < 2:
+                return
+
+            msg = parts[1]
+            client_id = self._quic.host_cid.hex()
+            self.broadcast_chat(msg , client_id)
+
 
         # DISCONNECT
         elif data_str == "Disconnected":
@@ -226,6 +250,27 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             client._quic.send_stream_data(client.stream_id, msg, end_stream=False)
             client.transmit()
         print(msg)
+
+
+    def broadcast_undrop(self, pos_str, type_str):
+        msg = f"UNDROPPED|{pos_str}|{type_str}\n".encode()
+        for client in list(state.active_clients):
+            if client == self:
+                continue
+            if client.stream_id is None:
+                continue
+            client._quic.send_stream_data(client.stream_id, msg, end_stream=False)
+            client.transmit()
+        print(msg)
+
+
+    def broadcast_chat(self, msg: str , client_id):
+        msg = f"CHAT|{client_id}|{msg}\n".encode()
+        for client in list(state.active_clients):
+            if client.stream_id is None:
+                continue
+            client._quic.send_stream_data(client.stream_id, msg, end_stream=False)
+            client.transmit()
 
     def broadcast_show_bullet(self, pos: str):
         msg = f"SHOWBULLET|{pos}\n".encode()
@@ -388,48 +433,43 @@ def spawn_random_monsters(amount):
     print(f"Server initialized with {spawned} monsters on the map.")
 
 
-def spawn_random_weapons(amount):  #גמיני המלך כתב
+def spawn_loot_per_camera_zone(game_map, per_zone=2):
     """
-    מפזרת נשקים רנדומליים על המפה בשקט (בלי לשדר לקליינטים).
-    מיועד להפעלה בתחילת המשחק או ברקע.
+    Spawn loot so that each camera-sized zone has at least per_zone items.
     """
-    tiles_high = len(state.game_map)
-    tiles_wide = len(state.game_map[0])
+    loot_list = []
 
-    spawned = 0
-    attempts = 0  # מונע לולאה אינסופית אם בטעות המפה מלאה בקירות
+    tiles_wide = len(game_map[0])
+    tiles_high = len(game_map)
 
-    while spawned < amount and attempts < amount * 10:
-        attempts += 1
+    zone_tiles_x = SCREEN_WIDTH // TILE_SIZE
+    zone_tiles_y = SCREEN_HEIGHT // TILE_SIZE
 
-        # מגרילים משבצת במפה
-        tile_x = random.randint(0, tiles_wide - 1)
-        tile_y = random.randint(0, tiles_high - 1)
+    for win_y in range(0, tiles_high, zone_tiles_y):
+        for win_x in range(0, tiles_wide, zone_tiles_x):
+            spawned = 0
+            attempts = 0
+            while spawned < per_zone and attempts < 50:
+                attempts += 1
+                tile_x = random.randint(win_x, min(win_x + zone_tiles_x - 1, tiles_wide - 1))
+                tile_y = random.randint(win_y, min(win_y + zone_tiles_y - 1, tiles_high - 1))
 
-        # בודקים אם יש שם רצפה (ולא קיר)
-        if state.game_map[tile_y][tile_x] == ".":
-            # ממירים את המשבצת לפיקסלים (כמו שהקליינט עושה)
-            pixel_x = float(tile_x * TILE_SIZE)
-            pixel_y = float(tile_y * TILE_SIZE)
+                if game_map[tile_y][tile_x] != "#":  # רק על רצפה
+                    x = tile_x * TILE_SIZE
+                    y = tile_y * TILE_SIZE
+                    name = random.choice(WEAPON_NAMES)
+                    loot_list.append((x, y, name))
+                    #create an unic id
+                    new_id = random.randint(1, MAX_WEAPONS)
+                    while new_id in state.map_weapons:
+                        new_id = random.randint(1, MAX_WEAPONS)
+                    state.map_weapons[new_id] = {
+                        "x": x,
+                        "y": y,
+                        "type": name
+                    }
 
-            # יוצרים ID ייחודי
-            new_id = random.randint(1, 1000000)
-            while new_id in state.map_weapons:
-                new_id = random.randint(1, 1000000)
-
-            # בוחרים נשק רנדומלי מהרשימה המותרת
-            weapon_type = random.choice(WEAPON_NAMES)
-
-            # מוסיפים בשקט למאגר של השרת
-            state.map_weapons[new_id] = {
-                "x": pixel_x,
-                "y": pixel_y,
-                "type": weapon_type
-            }
-
-            spawned += 1
-
-    print(f"Server initialized with {spawned} weapons on the map.")
+                    spawned += 1
 
 
 # ---------- Server entry ---------- #
@@ -462,7 +502,7 @@ async def main():
 
 
 if __name__ == "__main__":
-    spawn_random_weapons(DROPPED_WEAPONS)
+    spawn_loot_per_camera_zone(state.game_map)
     spawn_random_monsters(MONSTERS_AMOUNT)
     try:
         asyncio.run(main())
