@@ -125,6 +125,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                     continue
                 if other_pos == new_pos:
                     self.disconnect()  # kick the player
+                    print("player has been kicked! player collision")
                     break
 
             if check_movement(new_pos, state.players_pos[client_id]):
@@ -132,6 +133,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 self.broadcast_player(client_id, new_pos, state.players_hp[client_id], False)
             else:
                 self.disconnect() #kick the player
+                print("player has been kicked! movement problem")
 
         # ATTACK
         elif data_str.startswith("ATTACK|"):
@@ -190,9 +192,11 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
                 else:  # this weapon does not exist
                     self.disconnect()  # kick the player
+                    print("player has been kicked! weapon id = none")
 
             else:  # this weapon does not exist
                 self.disconnect()  # kick the player
+                print("player has been kicked! this weapon does not exist")
 
 
 
@@ -225,9 +229,11 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
                 else:  # he wants to drop something that he doesn't have
                     self.disconnect()  # kick the player
+                    print("player has been kicked! player does not have this weapon")
 
             else:  # he wants to drop something that the server don't recognize
                 self.disconnect()  # kick the player
+                print("player has been kicked! the server dont recognize this weapon")
 
 
         elif data_str.startswith("CHAT|"):
@@ -243,6 +249,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
         # DISCONNECT
         elif data_str == "Disconnected":
             self.disconnect()
+            print("player has been kicked! player disconnected")
 
     # ---------- Broadcast helpers ---------- #
 
