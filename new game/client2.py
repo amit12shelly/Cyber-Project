@@ -358,7 +358,7 @@ class RemotePlayer:
 
 def main():
     pygame.init()
-    screen = pygame.display.set_mode((1280, 720))
+    screen = pygame.display.set_mode((0,0),pygame.FULLSCREEN)
     pygame.display.set_caption("Game")
     clock = pygame.time.Clock()
 

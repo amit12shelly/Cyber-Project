@@ -9,7 +9,7 @@ from aioquic.quic.events import StreamDataReceived, QuicEvent, ConnectionTermina
 
 #----------server settings----------
 INVENTORY_SIZE = 5
-WEAPON_LIST = [["gun", 20, 20]] #-> name,damage,range
+WEAPON_LIST = [["gun", 20, 20]]  #-> name,damage,range
 WEAPON_NAMES = [w[0] for w in WEAPON_LIST]
 WEAPON_DAMAGE = [w[1] for w in WEAPON_LIST]
 WEAPON_RANGE = [w[2] for w in WEAPON_LIST]
@@ -17,11 +17,8 @@ MAX_BULLETS = 1000
 TILE_SIZE = 64
 TOLERANCE = TILE_SIZE / 2
 BULLETS_MOVE_TIME = 0.2
-DROPPED_WEAPONS = 50
+DROPPED_WEAPONS = 6000
 MONSTERS_AMOUNT = 100
-
-
-
 
 
 def load_map():
@@ -43,7 +40,7 @@ class GameState:
     game_map = load_map()
 
     #monsters info
-    monsters = {} #monster_id -> {x, y, hp}
+    monsters = {}  #monster_id -> {x, y, hp}
 
 
 state = GameState()
@@ -175,7 +172,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
 
 
-            else: #this weapon does not exist
+            else:  #this weapon does not exist
                 self.disconnect()  # kick the player
 
         elif data_str.startswith("DROP|"):
@@ -273,7 +270,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
         self.broadcast_remove(client_id)
         print(client_id, "disconnected")
 
-    async def gun_tracking(self, bullet_id: int ,gun_type):
+    async def gun_tracking(self, bullet_id: int, gun_type):
         if bullet_id not in state.active_bullets:
             return
 
@@ -282,11 +279,10 @@ class EchoQuicProtocol(QuicConnectionProtocol):
         angle = state.active_bullets[bullet_id]["angle"]
         gun_range = 0
         gun_damage = 0
-        for i in range (len(WEAPON_NAMES)):
+        for i in range(len(WEAPON_NAMES)):
             if WEAPON_NAMES[i] == gun_type:
                 gun_damage = int(WEAPON_DAMAGE[i])
                 gun_range = int(WEAPON_RANGE[i])
-
 
         for _ in range(gun_range):
             x, y = get_next_bullet_position(x, y, angle)
@@ -294,16 +290,14 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             state.active_bullets[bullet_id]["y"] = y
 
             pos = f"{x},{y}"
-            if not check_if_in_map(x, y): #checks if the bullet got out of the map
+            if not check_if_in_map(x, y):  #checks if the bullet got out of the map
                 del state.active_bullets[bullet_id]
                 return
-            if state.game_map[int(y / TILE_SIZE)][int(x / TILE_SIZE)] == "#": #checks if the bullet got into wall
+            if state.game_map[int(y / TILE_SIZE)][int(x / TILE_SIZE)] == "#":  #checks if the bullet got into wall
                 del state.active_bullets[bullet_id]
                 return
-
 
             self.broadcast_show_bullet(pos)
-
 
             for player_id, pos_str in list(state.players_pos.items()):
                 px, py = map(float, pos_str.split(","))
@@ -312,9 +306,6 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                         del state.active_bullets[bullet_id]
                         self.damage(player_id, gun_damage)
                         return
-
-
-
 
             await asyncio.sleep(BULLETS_MOVE_TIME)
 
@@ -336,7 +327,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
 # ---------- Utils ---------- #
 def check_if_in_map(x, y):
-    x = int(float(x)/ TILE_SIZE)
+    x = int(float(x) / TILE_SIZE)
     y = int(float(y) / TILE_SIZE)
     if y >= len(state.game_map):
         return False
@@ -347,10 +338,7 @@ def check_if_in_map(x, y):
     elif x < 0:
         return False
 
-
     return True
-
-
 
 
 def get_next_bullet_position(x, y, angle_degrees):
@@ -362,14 +350,14 @@ def check_movement(new_pos, old_pos):
     new_x, new_y = map(float, new_pos.split(","))
     old_x, old_y = map(float, old_pos.split(","))
     if check_if_in_map(new_x, new_y):
-        if state.game_map[int(new_y / TILE_SIZE)][int(new_x / TILE_SIZE)] == "." :
+        if state.game_map[int(new_y / TILE_SIZE)][int(new_x / TILE_SIZE)] == ".":
             if abs(new_x - old_x) <= 8 and abs(new_y - old_y) <= 8:
                 return True
 
     return False
 
-def spawn_random_monsters(amount):
 
+def spawn_random_monsters(amount):
     tiles_high = len(state.game_map)
     tiles_wide = len(state.game_map[0])
 
@@ -377,22 +365,17 @@ def spawn_random_monsters(amount):
 
     while spawned < amount:
 
-
         tile_x = random.randint(0, tiles_wide - 1)
         tile_y = random.randint(0, tiles_high - 1)
-
 
         if state.game_map[tile_y][tile_x] == ".":
 
             pixel_x = float(tile_x * TILE_SIZE)
             pixel_y = float(tile_y * TILE_SIZE)
 
-
             new_id = random.randint(1, 1000000)
             while new_id in state.monsters:
                 new_id = random.randint(1, 1000000)
-
-
 
             state.monsters[new_id] = {
                 "x": pixel_x,
@@ -405,8 +388,7 @@ def spawn_random_monsters(amount):
     print(f"Server initialized with {spawned} monsters on the map.")
 
 
-
-def spawn_random_weapons(amount): #גמיני המלך כתב
+def spawn_random_weapons(amount):  #גמיני המלך כתב
     """
     מפזרת נשקים רנדומליים על המפה בשקט (בלי לשדר לקליינטים).
     מיועד להפעלה בתחילת המשחק או ברקע.
