@@ -89,7 +89,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
             state.players_inventory[client_id] = {int(i): "none" for i in range(INVENTORY_SIZE)}
 
-            id_msg = f"{client_id}".encode()
+            id_msg = f"SETID|{client_id}".encode()
             self._quic.send_stream_data(0, id_msg, end_stream=False)
 
             # send existing players to new player
