@@ -20,7 +20,8 @@ BULLETS_MOVE_TIME = 0.2
 MONSTERS_AMOUNT = 100
 SCREEN_WIDTH = 1920
 SCREEN_HEIGHT = 1080
-MAX_WEAPONS = 500
+MAX_WEAPONS = 10000
+AMOUNT_TO_DROP_IN_DEATH = 2
 
 def load_map():
     with open("map.txt", "r") as f:
@@ -360,6 +361,15 @@ class EchoQuicProtocol(QuicConnectionProtocol):
     def damage(self, client_id: str, damage: int):
         hp = int(state.players_hp.get(client_id))
         if hp - damage <= 0:
+            pos = state.players_pos[client_id]
+            dropped = 0
+            inv_slot = 1
+            while dropped < AMOUNT_TO_DROP_IN_DEATH or inv_slot < INVENTORY_SIZE:
+                item = state.players_inventory[self._quic.host_cid.hex()].get(inv_slot)
+                if item != "none":
+                    self.broadcast_drop(pos, item)
+                    dropped += 1
+
             print("player killed!")
             self.broadcast_remove(client_id)
             state.players_pos[client_id] = "0,0"
@@ -460,9 +470,9 @@ def spawn_loot_per_camera_zone(game_map, per_zone=2):
                     name = random.choice(WEAPON_NAMES)
                     loot_list.append((x, y, name))
                     #create an unic id
-                    new_id = random.randint(1, MAX_WEAPONS)
+                    new_id = random.randint(1, int(MAX_WEAPONS))
                     while new_id in state.map_weapons:
-                        new_id = random.randint(1, MAX_WEAPONS)
+                        new_id = random.randint(1, int(MAX_WEAPONS))
                     state.map_weapons[new_id] = {
                         "x": x,
                         "y": y,
