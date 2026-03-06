@@ -74,23 +74,27 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             self.disconnect()
 
     def handle_message(self, data_str: str):
-        client_id = self._quic.host_cid.hex()
-
         # CONNECTED
         print(data_str)
         if data_str.startswith("Connected"):
-            print(client_id, "connected!")
+            print(self._quic.host_cid.hex(), "connected!")
+            parts = data_str.split("|")
 
-            state.players_pos[client_id] = "0,0"
-            state.players_hp[client_id] = "100"
-            state.players_inventory[client_id] = {int(i): "none" for i in range(INVENTORY_SIZE)}
+            if len(parts) >= 3:
+                state.players_pos[self._quic.host_cid.hex()] = parts[1]
+                state.players_hp[self._quic.host_cid.hex()] = parts[2]
+                state.players_inventory[self._quic.host_cid.hex()] = {int(i): "none" for i in range(INVENTORY_SIZE)}
+            else:
+                state.players_pos[self._quic.host_cid.hex()] = "0,0"
+                state.players_hp[self._quic.host_cid.hex()] = "100"
+                state.players_inventory[self._quic.host_cid.hex()] = {int(i): "none" for i in range(INVENTORY_SIZE)}
 
-            id_msg = f"{client_id}".encode()
+            id_msg = f"{self._quic.host_cid.hex()}".encode()
             self._quic.send_stream_data(0, id_msg, end_stream=False)
 
             # send existing players to new player
             for other_id, pos in state.players_pos.items():
-                if other_id == client_id:
+                if other_id == self._quic.host_cid.hex():
                     continue
                 hp = state.players_hp.get(other_id, "100")
                 msg = f"UPDATE|{other_id}|{pos}|{hp}\n".encode()
@@ -104,7 +108,9 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                     self._quic.send_stream_data(self.stream_id, msg, end_stream=False)
 
             # tell others about new player
-            self.broadcast_player(client_id, state.players_pos[client_id], state.players_hp[client_id], False)
+            self.broadcast_player(self._quic.host_cid.hex(), state.players_pos[self._quic.host_cid.hex()],
+                                  state.players_hp[
+                                      self._quic.host_cid.hex()], False)
             self.transmit()
 
         # MOVEMENT
@@ -114,14 +120,15 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 return
             new_pos = parts[1]
 
-            if client_id not in state.players_pos:
+            if self._quic.host_cid.hex() not in state.players_pos:
                 return
 
-            if check_movement(new_pos, state.players_pos[client_id]):
-                state.players_pos[client_id] = new_pos
-                self.broadcast_player(client_id, new_pos, state.players_hp[client_id], False)
+            if check_movement(new_pos, state.players_pos[self._quic.host_cid.hex()]):
+                state.players_pos[self._quic.host_cid.hex()] = new_pos
+                self.broadcast_player(self._quic.host_cid.hex(), new_pos, state.players_hp[self._quic.host_cid.hex()],
+                                      False)
             else:
-                self.disconnect() #kick the player
+                self.disconnect()  # kick the player
 
         # ATTACK
         elif data_str.startswith("ATTACK|"):
@@ -134,7 +141,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 while new_id in state.active_bullets:
                     new_id = random.randint(1, MAX_BULLETS)
 
-                pos_str = state.players_pos.get(client_id, "0,0")
+                pos_str = state.players_pos.get(self._quic.host_cid.hex(), "0,0")
                 x_str, y_str = pos_str.split(",")
                 angle = float(parts[2])
 
@@ -168,10 +175,15 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
                 if found_weapon_id is not None:  #if its real
                     for slot in range(INVENTORY_SIZE):
-                        if state.players_inventory[client_id].get(slot) == "none":
-                            state.players_inventory[client_id][slot] = pickup_type
+                        if state.players_inventory[self._quic.host_cid.hex()].get(slot) == "none":
+                            state.players_inventory[self._quic.host_cid.hex()][slot] = pickup_type
+                            pos_str = f"{state.map_weapons[found_weapon_id]['x']},{state.map_weapons[found_weapon_id]['y']}"
+                            self.broadcast_undrop(pos_str , state.map_weapons[found_weapon_id]["type"])
                             del state.map_weapons[found_weapon_id]
                             break
+
+                else:  # this weapon does not exist
+                    self.disconnect()  # kick the player
 
 
 
@@ -186,11 +198,11 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             x_str = pos_str.split(",")[0]
             y_str = pos_str.split(",")[1]
             weapon_slot = data_str.split("|")[2]
-            drop = state.players_inventory[client_id].get(weapon_slot)
+            drop = state.players_inventory[self._quic.host_cid.hex()].get(weapon_slot)
             if drop in WEAPON_NAMES:
                 if drop != "none":  #if he has something to drop
 
-                    state.players_inventory[client_id][
+                    state.players_inventory[self._quic.host_cid.hex()][
                         weapon_slot] = "none"  #removing the weapon from the player inventory
 
                     new_id = random.randint(1, 1000000)
@@ -220,6 +232,17 @@ class EchoQuicProtocol(QuicConnectionProtocol):
     # ---------- Broadcast helpers ---------- #
 
     def broadcast_drop(self, pos_str, type_str):
+        msg = f"DROPPED|{pos_str}|{type_str}\n".encode()
+        for client in list(state.active_clients):
+            if client == self:
+                continue
+            if client.stream_id is None:
+                continue
+            client._quic.send_stream_data(client.stream_id, msg, end_stream=False)
+            client.transmit()
+        print(msg)
+
+    def broadcast_undrop(self, pos_str, type_str):
         msg = f"DROPPED|{pos_str}|{type_str}\n".encode()
         for client in list(state.active_clients):
             if client == self:
