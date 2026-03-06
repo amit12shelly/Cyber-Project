@@ -285,7 +285,15 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             state.active_bullets[bullet_id]["y"] = y
 
             pos = f"{x},{y}"
+            if state.game_map[int(x / TILE_SIZE)][int(y / TILE_SIZE)] == "#": #checks if the bullet got into wall
+                del state.active_bullets[bullet_id]
+                return
+            if check_if_in_map(x, y): #checks if the bullet got out of the map
+                del state.active_bullets[bullet_id]
+                return
+
             self.broadcast_show_bullet(pos)
+
 
             for player_id, pos_str in list(state.players_pos.items()):
                 px, py = map(float, pos_str.split(","))
@@ -294,9 +302,8 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                         del state.active_bullets[bullet_id]
                         self.damage(player_id, GUN_DAMAGE)
                         return
-                if state.game_map[int(py / TILE_SIZE)][int(px / TILE_SIZE)] == "#":
-                    del state.active_bullets[bullet_id]
-                    return
+
+
 
 
             await asyncio.sleep(BULLETS_MOVE_TIME)
@@ -315,6 +322,21 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
 
 # ---------- Utils ---------- #
+def check_if_in_map(x, y):
+    if y > len(state.game_map):
+        return False
+    elif y < 0:
+        return False
+    elif x > len(state.game_map[0]):
+        return False
+    elif x < 0:
+        return False
+
+
+    return True
+
+
+
 
 def get_next_bullet_position(x, y, angle_degrees):
     angle_rad = math.radians(angle_degrees)
@@ -326,7 +348,8 @@ def check_movement(new_pos, old_pos):
     old_x, old_y = map(float, old_pos.split(","))
     if state.game_map[int(new_y / TILE_SIZE)][int(new_x / TILE_SIZE)] == "." :
         if abs(new_x - old_x) <= 8 and abs(new_y - old_y) <= 8:
-            return True
+            if check_if_in_map(new_x, new_y):
+                return True
 
     return False
 
