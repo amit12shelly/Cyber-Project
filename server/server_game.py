@@ -323,7 +323,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
         if client_id in state.players_hp:
             del state.players_hp[client_id]
         if client_id in state.players_inventory:
-            del state.players_hp[client_id]
+            del state.players_inventory[client_id]
         if self in state.active_clients:
             state.active_clients.remove(self)
 
