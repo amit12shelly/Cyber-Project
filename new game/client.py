@@ -466,10 +466,11 @@ def main():
                     continue
                 player_id = parts[1]
                 if player_id in remote_players:
+                    del remote_players[player_id]
+                else:
                     if player_id == MY_ID:
                         pygame.quit();exit()
-                    else:
-                        del remote_players[player_id]
+
 
             elif parts[0] == "DROPPED":
                 if len(parts) < 3:
