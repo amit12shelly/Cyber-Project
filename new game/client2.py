@@ -399,6 +399,37 @@ def draw_chat(screen, chat_font, chat_messages, chat_open, chat_input):
         pygame.draw.rect(screen, (180, 180, 180), (CHAT_X, input_y, input_w, input_box_h), 1)
         cursor = "|" if int(time.time() * 2) % 2 == 0 else " "
         screen.blit(chat_font.render(chat_input + cursor, True, CHAT_TEXT_COLOR), (CHAT_X + CHAT_PADDING, input_y + CHAT_PADDING))
+
+
+def draw_fps(screen, clock, font):
+    """
+    מציירת מדד FPS מעוצב בפינה העליונה.
+    """
+    # שליפת ה-FPS הנוכחי מהשעון של Pygame
+    fps_val = int(clock.get_fps())
+    fps_text = f"FPS: {fps_val}"
+
+    # יצירת המשטח של הטקסט
+    # צבע ירוק אם ה-FPS גבוה, אדום אם הוא נמוך מ-30
+    color = (0, 255, 0) if fps_val > 30 else (255, 50, 50)
+    fps_surface = font.render(fps_text, True, color)
+
+    # הגדרת מיקום וגודל הרקע (Rect)
+    padding = 10
+    rect_width = fps_surface.get_width() + (padding * 2)
+    rect_height = fps_surface.get_height() + (padding)
+    fps_rect = pygame.Rect(10, 10, rect_width, rect_height)
+
+    # ציור רקע שחור חצי שקוף
+    bg_surface = pygame.Surface((rect_width, rect_height), pygame.SRCALPHA)
+    bg_surface.fill((0, 0, 0, 150))  # 150 זה רמת השקיפות
+    screen.blit(bg_surface, (10, 10))
+
+    # ציור מסגרת דקה סביב המדד
+    pygame.draw.rect(screen, (100, 100, 100), fps_rect, 1)
+
+    # ציור הטקסט עצמו
+    screen.blit(fps_surface, (10 + padding, 10 + padding // 2))
 # ---------------- MAIN GAME LOOP ---------------- #
 
 def main():
@@ -600,6 +631,8 @@ def main():
         player.draw(screen, camera_x, camera_y)
         for rp in remote_players.values():
             rp.draw(screen, camera_x, camera_y)
+
+        draw_fps(screen, clock, chat_font)
         draw_inventory(screen, player)
         draw_chat(screen, chat_font, chat_messages, chat_open, chat_input)
         pygame.display.flip()
