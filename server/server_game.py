@@ -79,7 +79,12 @@ class EchoQuicProtocol(QuicConnectionProtocol):
         print(data_str)
         if data_str.startswith("Connected"):
             print(client_id, "connected!")
-            parts = data_str.split("|")
+            try:
+                parts = data_str.split("|")
+            except:
+                print("Error while splitting Connected command!")
+                return
+
             if len(parts) < 3:
                 state.players_pos[client_id] = "0,0"
                 state.players_hp[client_id] = "100"
@@ -113,7 +118,11 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
         # MOVEMENT
         elif data_str.startswith("UPDATE|"):
-            parts = data_str.split("|")
+            try:
+                parts = data_str.split("|")
+            except:
+                print("Error while splitting UPDATE command!")
+                return
             if len(parts) < 2:
                 return
             new_pos = parts[1]
@@ -137,7 +146,11 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
         # ATTACK
         elif data_str.startswith("ATTACK|"):
-            parts = data_str.split("|")
+            try:
+                parts = data_str.split("|")
+            except:
+                print("Error while splitting ATTACK command!")
+                return
             if len(parts) < 3:
                 return
             weapon = parts[1]
@@ -147,7 +160,11 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                     new_id = random.randint(1, MAX_BULLETS)
 
                 pos_str = state.players_pos.get(client_id, "0,0")
-                x_str, y_str = pos_str.split(",")
+                try:
+                    x_str, y_str = pos_str.split(",")
+                except:
+                    print("Error while splitting the pos in the ATTACK command!")
+                    return
                 angle = float(parts[2])
 
                 state.active_bullets[new_id] = {
@@ -161,15 +178,23 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
 
         elif data_str.startswith("PICKUP|"):
-            parts = data_str.split("|")
+            try:
+                parts = data_str.split("|")
+            except:
+                print("Error while splitting the PICKUP command!")
+                return
 
             if len(parts) < 3:
                 return
 
-            pickup_pos = data_str.split("|")[1]
-            pickup_type = data_str.split("|")[2]
-            px = float(pickup_pos.split(",")[0])
-            py = float(pickup_pos.split(",")[1])
+            pickup_pos = parts[1]
+            pickup_type = parts[2]
+            try:
+                px = float(pickup_pos.split(",")[0])
+                py = float(pickup_pos.split(",")[1])
+            except:
+                print("Error while splitting the pos in the PICKUP command!")
+                return
             found_weapon_id = None
 
             if pickup_type in WEAPON_NAMES:
@@ -201,13 +226,21 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
 
         elif data_str.startswith("DROP|"):
-            parts = data_str.split("|")
+            try:
+                parts = data_str.split("|")
+            except:
+                print("Error while splitting the DROP command!")
+                return
 
             if len(parts) < 3:
                 return
-            pos_str = data_str.split("|")[1]
-            x_str = pos_str.split(",")[0]
-            y_str = pos_str.split(",")[1]
+            pos_str = parts[1]
+            try:
+                x_str = pos_str.split(",")[0]
+                y_str = pos_str.split(",")[1]
+            except:
+                print("Error while splitting the pos in the DROP command!")
+                return
             weapon_slot = int(parts[2])
             drop = state.players_inventory[self._quic.host_cid.hex()].get(weapon_slot)
             if drop in WEAPON_NAMES:
@@ -237,7 +270,11 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
 
         elif data_str.startswith("CHAT|"):
-            parts = data_str.split("|")
+            try:
+                parts = data_str.split("|")
+            except:
+                print("Error while splitting the CHAT command!")
+                return
             if len(parts) < 2:
                 return
 
@@ -360,7 +397,11 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             self.broadcast_show_bullet(pos)
 
             for player_id, pos_str in list(state.players_pos.items()):
-                px, py = map(float, pos_str.split(","))
+                try:
+                    px, py = map(float, pos_str.split(","))
+                except:
+                    print("Error while splitting the in the gun_tracking!")
+                    return
                 if abs(px - x) <= TOLERANCE and abs(py - y) <= TOLERANCE:
                     if player_id != self._quic.host_cid.hex():
                         del state.active_bullets[bullet_id]
@@ -384,9 +425,15 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                     new_id = random.randint(1, 1000000)
                     while new_id in state.map_weapons:
                         new_id = random.randint(1, 1000000)
+                    try:
+                        x = float(pos.split(",")[0])
+                        y = float(pos.split(",")[1])
+                    except:
+                        print("Error while splitting the in the damage function!")
+                        return
                     state.map_weapons[new_id] = {
-                        "x": float(pos.split(",")[0]),
-                        "y": float(pos.split(",")[1]),
+                        "x": x,
+                        "y": y,
                         "type": item
                     }
                     self.broadcast_drop(pos, item)
@@ -431,8 +478,12 @@ def get_next_bullet_position(x, y, angle_degrees):
 
 
 def check_movement(new_pos, old_pos):
-    new_x, new_y = map(float, new_pos.split(","))
-    old_x, old_y = map(float, old_pos.split(","))
+    try:
+        new_x, new_y = map(float, new_pos.split(","))
+        old_x, old_y = map(float, old_pos.split(","))
+    except:
+        print("Error while splitting the in the check_movement function!")
+        return
     if check_if_in_map(new_x, new_y):
         if state.game_map[int(new_y / TILE_SIZE)][int(new_x / TILE_SIZE)] == ".":
             if abs(new_x - old_x) <= 8 and abs(new_y - old_y) <= 8:
