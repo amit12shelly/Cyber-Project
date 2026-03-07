@@ -467,6 +467,8 @@ def main():
                 player_id = parts[1]
                 if player_id in remote_players:
                     del remote_players[player_id]
+                    if player_id == MY_ID:
+                        pygame.quit();exit()
                 else:
                     if player_id == MY_ID:
                         pygame.quit();exit()
