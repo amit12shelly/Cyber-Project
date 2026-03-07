@@ -2,6 +2,7 @@ import asyncio
 import math
 import random
 import psutil
+import heapq
 
 from aioquic.asyncio import QuicConnectionProtocol, serve
 from aioquic.quic.configuration import QuicConfiguration
@@ -373,53 +374,70 @@ def find_nearest_player(monster_x, monster_y):
 
 def find_neighbors(current_node, target):
     neighbor_nodes = []
-    for i in range(3): # use i-1
-        for j in range(3): # use j-1
-            if not (i-1 == 0 and j-1 ==0):
-                G_cost = current_node.data[2] + pitagoras(ENTITIES_SPEED*(j-1),ENTITIES_SPEED*(i-1))
-                H_cost = pitagoras((target[0] - (current_node.data[0] + ((j - 1) * ENTITIES_SPEED))), (target[1] - (current_node.data[1] + ((i - 1) * ENTITIES_SPEED))))
-                F_cost = G_cost + H_cost
-                neighbor_node = Node((current_node.data[0]+ENTITIES_SPEED*(j-1), current_node.data[1]+ENTITIES_SPEED*(i-1), G_cost, H_cost, F_cost))
-                neighbor_node.next = current_node
-                neighbor_nodes.append(neighbor_node)
+
+    cx, cy, g = current_node.data[0], current_node.data[1], current_node.data[2]
+
+    for i in range(3):
+        for j in range(3):
+            dx = (j-1) * ENTITIES_SPEED
+            dy = (i-1) * ENTITIES_SPEED
+
+            if dx == 0 and dy == 0:
+                continue
+
+            nx = cx + dx
+            ny = cy + dy
+
+            step_cost = pitagoras(dx, dy)
+            G_cost = g + step_cost
+
+            H_cost = pitagoras(target[0] - nx, target[1] - ny)
+            F_cost = G_cost + H_cost
+
+            neighbor_node = Node((nx, ny, G_cost, H_cost, F_cost))
+            neighbor_node.next = current_node
+
+            neighbor_nodes.append(neighbor_node)
+
     return neighbor_nodes
 
-def A_star_algorythm(start, target): # node-(x, y, G_cost, H_cost, F_cost)
-    open_nodes = []
-    closed_nodes = []
-    start_H_cost = pitagoras((target[0]-start[0]),(target[1]-start[1]))
-    open_nodes.append(Node((start[0], start[1], 0, start_H_cost, start_H_cost)))
+def A_star_algorythm(start, target):
 
-    while open_nodes:
-        current_node = open_nodes[0]
-        for node in open_nodes:
-            if node.data[4] < current_node.data[4]:
-                current_node = node
-        open_nodes.remove(current_node)
-        closed_nodes.append(current_node)
+    open_heap = []
+    closed_set = set()
+
+    start_h = pitagoras(target[0]-start[0], target[1]-start[1])
+    start_node = Node((start[0], start[1], 0, start_h, start_h))
+
+    heapq.heappush(open_heap, (start_node.data[4], start_node))
+
+    while open_heap:
+
+        _, current_node = heapq.heappop(open_heap)
+
+        cx, cy = current_node.data[0], current_node.data[1]
+
+        if (cx, cy) in closed_set:
+            continue
+
+        closed_set.add((cx, cy))
 
         if current_node.data[3] < TILE_SIZE:
             return current_node
 
         neighbors = find_neighbors(current_node, target)
-        for neighbor in neighbors:
-            # add if node is in wall skip neighbor (continue)
 
-            val1, val2 = neighbor.data[:2]
-            if any(in_closed.data[0] == val1 and in_closed.data[1] == val2 for in_closed in closed_nodes):
+        for neighbor in neighbors:
+
+            nx, ny = neighbor.data[0], neighbor.data[1]
+
+            # wall check can go here later
+            # if is_wall(nx, ny): continue
+
+            if (nx, ny) in closed_set:
                 continue
 
-            found = False
-            for open_neighbor in open_nodes:
-                if open_neighbor.data[0] == neighbor.data[0] and open_neighbor.data[1] == neighbor.data[1]:
-                    found = True
-                    if open_neighbor.data[4] > neighbor.data[4]:
-                        open_neighbor.data = neighbor.data
-                        open_neighbor.next = current_node
-                    break
-            if not found:
-                neighbor.next = current_node
-                open_nodes.append(neighbor)
+            heapq.heappush(open_heap, (neighbor.data[4], neighbor))
 
 
 def get_next_bullet_position(x, y, angle_degrees):
