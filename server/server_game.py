@@ -317,7 +317,8 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
     def disconnect(self):
         client_id = self._quic.host_cid.hex()
-
+        self.broadcast_remove(client_id)
+        
         if client_id in state.players_pos:
             del state.players_pos[client_id]
         if client_id in state.players_hp:
@@ -327,7 +328,6 @@ class EchoQuicProtocol(QuicConnectionProtocol):
         if self in state.active_clients:
             state.active_clients.remove(self)
 
-        self.broadcast_remove(client_id)
         print(client_id, "disconnected")
 
     async def gun_tracking(self, bullet_id: int, gun_type):
