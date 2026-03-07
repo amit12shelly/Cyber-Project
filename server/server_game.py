@@ -19,6 +19,7 @@ TOLERANCE = TILE_SIZE / 2
 BULLETS_MOVE_TIME = 0.2
 DROPPED_WEAPONS = 50
 MONSTERS_AMOUNT = 100
+ENTITIES_SPEED = 4
 
 
 
@@ -335,6 +336,15 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
 
 # ---------- Utils ---------- #
+
+class Node:
+  def __init__(self, data):
+    self.data = data
+    self.next = None
+
+def pitagoras(x,y):
+    return math.sqrt((x*x)+(y*y))
+
 def check_if_in_map(x, y):
     x = int(float(x)/ TILE_SIZE)
     y = int(float(y) / TILE_SIZE)
@@ -350,7 +360,66 @@ def check_if_in_map(x, y):
 
     return True
 
+def find_nearest_player(monster_x, monster_y):
+    min_x = 10000000
+    min_y = 10000000
+    for other_id, pos in state.players_pos.items():
+        player_x = pos.split(",")[0]
+        player_y = pos.split(",")[1]
+        if (player_x*player_x + player_y*player_y) < (min_x*min_x + min_y*min_y):
+            min_x = player_x
+            min_y = player_y
+    return min_x, min_y
 
+def find_neighbors(current_node, target):
+    neighbor_nodes = []
+    for i in range(3): # use i-1
+        for j in range(3): # use j-1
+            if not (i-1 == 0 and j-1 ==0):
+                G_cost = current_node.data[2] + pitagoras(ENTITIES_SPEED*(j-1),ENTITIES_SPEED*(i-1))
+                H_cost = pitagoras((target[0] - (current_node.data[0] + ((j - 1) * ENTITIES_SPEED))), (target[1] - (current_node.data[1] + ((i - 1) * ENTITIES_SPEED))))
+                F_cost = G_cost + H_cost
+                neighbor_node = Node((current_node.data[0]+ENTITIES_SPEED*(j-1), current_node.data[1]+ENTITIES_SPEED*(i-1), G_cost, H_cost, F_cost))
+                neighbor_node.next = current_node
+                neighbor_nodes.append(neighbor_node)
+    return neighbor_nodes
+
+def A_star_algorythm(start, target): # node-(x, y, G_cost, H_cost, F_cost)
+    open_nodes = []
+    closed_nodes = []
+    start_H_cost = pitagoras((target[0]-start[0]),(target[1]-start[1]))
+    open_nodes.append(Node((start[0], start[1], 0, start_H_cost, start_H_cost)))
+
+    while open_nodes:
+        current_node = open_nodes[0]
+        for node in open_nodes:
+            if node.data[4] < current_node.data[4]:
+                current_node = node
+        open_nodes.remove(current_node)
+        closed_nodes.append(current_node)
+
+        if current_node.data[3] < TILE_SIZE:
+            return current_node
+
+        neighbors = find_neighbors(current_node, target)
+        for neighbor in neighbors:
+            # add if node is in wall skip neighbor (continue)
+
+            val1, val2 = neighbor.data[:2]
+            if any(in_closed.data[0] == val1 and in_closed.data[1] == val2 for in_closed in closed_nodes):
+                continue
+
+            found = False
+            for open_neighbor in open_nodes:
+                if open_neighbor.data[0] == neighbor.data[0] and open_neighbor.data[1] == neighbor.data[1]:
+                    found = True
+                    if open_neighbor.data[4] > neighbor.data[4]:
+                        open_neighbor.data = neighbor.data
+                        open_neighbor.next = current_node
+                    break
+            if not found:
+                neighbor.next = current_node
+                open_nodes.append(neighbor)
 
 
 def get_next_bullet_position(x, y, angle_degrees):
@@ -363,7 +432,7 @@ def check_movement(new_pos, old_pos):
     old_x, old_y = map(float, old_pos.split(","))
     if check_if_in_map(new_x, new_y):
         if state.game_map[int(new_y / TILE_SIZE)][int(new_x / TILE_SIZE)] == "." :
-            if abs(new_x - old_x) <= 8 and abs(new_y - old_y) <= 8:
+            if abs(new_x - old_x) <= 2*ENTITIES_SPEED and abs(new_y - old_y) <= 2*ENTITIES_SPEED:
                 return True
 
     return False
