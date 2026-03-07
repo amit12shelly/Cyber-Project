@@ -87,7 +87,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 state.players_pos[client_id] = parts[1]
                 state.players_hp[client_id] = parts[2]
 
-            state.players_inventory[client_id] = {int(i): "none" for i in range(INVENTORY_SIZE)}
+            state.players_inventory[client_id] = {int(i): "none" for i in range(1, INVENTORY_SIZE + 1)}
 
             id_msg = f"SETID|{client_id}\n".encode()
             self._quic.send_stream_data(0, id_msg, end_stream=False)
@@ -379,15 +379,15 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             dropped = 0
             inv_slot = 1
             while dropped < AMOUNT_TO_DROP_IN_DEATH or inv_slot < INVENTORY_SIZE:
-                item = state.players_inventory[self._quic.host_cid.hex()].get(inv_slot)
+                item = state.players_inventory[client_id].get(inv_slot)
                 if item != "none":
                     new_id = random.randint(1, 1000000)
                     while new_id in state.map_weapons:
                         new_id = random.randint(1, 1000000)
                     state.map_weapons[new_id] = {
-                        "x": float(pos.split(","[0])),
-                        "y": float(pos.split(","[1])),
-                        "type": item,
+                        "x": float(pos.split(",")[0]),
+                        "y": float(pos.split(",")[1]),
+                        "type": item
                     }
                     self.broadcast_drop(pos, item)
                     dropped += 1
@@ -397,6 +397,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             inv_slot = 1
             while inv_slot < INVENTORY_SIZE:
                 state.players_inventory[client_id][inv_slot] = "none"
+                inv_slot += 1
 
             self.broadcast_remove(client_id)
             state.players_pos[client_id] = "0,0"
@@ -528,12 +529,12 @@ async def main():
     config.load_cert_chain("cert.pem", "key.pem")
 
     print("Starting QUIC server on udp:0.0.0.0:4433")
-    await serve(
+    asyncio.create_task(serve(
         host="0.0.0.0",
         port=4433,
         configuration=config,
         create_protocol=EchoQuicProtocol,
-    )
+    ))
 
     asyncio.create_task(check_cpu())
     await asyncio.Future()

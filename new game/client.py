@@ -387,7 +387,7 @@ def main():
     remote_players = {}
     # Loot pool (מאגר פריטים)
     loot_pool = [
-        ("weapon", "Gun", gun1_img),
+        ("weapon", "gun", gun1_img),
         ("weapon", "shotGun", gun2_img),
     ]
 
