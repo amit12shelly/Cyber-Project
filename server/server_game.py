@@ -126,7 +126,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 if other_pos == new_pos:
                     self.disconnect()  # kick the player
                     print("player has been kicked! player collision")
-                    break
+                    return
 
             if check_movement(new_pos, state.players_pos[client_id]):
                 state.players_pos[client_id] = new_pos
