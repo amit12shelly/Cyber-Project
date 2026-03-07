@@ -13,6 +13,17 @@ TOLERANCE = 5
 MY_ID = ""
 incoming_messages = Queue()
 outgoing_messages = Queue()
+import time
+
+CHAT_MAX_MESSAGES = 10
+CHAT_FADE_SECONDS = 8
+CHAT_INPUT_MAX_LEN = 100
+CHAT_TEXT_COLOR = (255, 255, 255)
+CHAT_FONT_SIZE = 18
+CHAT_PADDING = 6
+CHAT_MSG_HEIGHT = 22
+CHAT_X = 10
+CHAT_Y_BOTTOM_OFFSET = 120
 
 
 async def quic_network_loop():
@@ -354,7 +365,40 @@ class RemotePlayer:
         for i in range(bar_width):
             color = (0, 255, 0) if i < self.hp else (255, 0, 0)
             pygame.draw.line(screen, color, (bar_x + i, bar_y), (bar_x + i, bar_y + bar_height))
+def draw_chat(screen, chat_font, chat_messages, chat_open, chat_input):
+    screen_h = screen.get_height()
+    now = time.time()
+    visible = []
+    for msg_text, msg_time in chat_messages[-CHAT_MAX_MESSAGES:]:
+        age = now - msg_time
+        if chat_open or age < CHAT_FADE_SECONDS:
+            fade_start = CHAT_FADE_SECONDS * 0.75
+            alpha = 255 if (chat_open or age < fade_start) else int(255 * (1.0 - (age - fade_start) / (CHAT_FADE_SECONDS - fade_start)))
+            visible.append((msg_text, alpha))
 
+    input_box_h = CHAT_MSG_HEIGHT + CHAT_PADDING * 2
+    base_y = screen_h - CHAT_Y_BOTTOM_OFFSET - (input_box_h if chat_open else 0)
+
+    for i, (msg_text, alpha) in enumerate(reversed(visible)):
+        rendered = chat_font.render(msg_text, True, CHAT_TEXT_COLOR)
+        row_y = base_y - (i + 1) * CHAT_MSG_HEIGHT - CHAT_PADDING
+        bg_surf = pygame.Surface((rendered.get_width() + CHAT_PADDING * 2, rendered.get_height() + 4), pygame.SRCALPHA)
+        bg_surf.fill((0, 0, 0, min(alpha // 2, 120)))
+        screen.blit(bg_surf, (CHAT_X, row_y - 2))
+        faded = rendered.copy()
+        faded.set_alpha(alpha)
+        screen.blit(faded, (CHAT_X + CHAT_PADDING, row_y))
+
+    if chat_open:
+        input_y = base_y
+        input_w = 400
+        input_box_h = CHAT_MSG_HEIGHT + CHAT_PADDING * 2
+        bg_surf = pygame.Surface((input_w, input_box_h), pygame.SRCALPHA)
+        bg_surf.fill((0, 0, 0, 160))
+        screen.blit(bg_surf, (CHAT_X, input_y))
+        pygame.draw.rect(screen, (180, 180, 180), (CHAT_X, input_y, input_w, input_box_h), 1)
+        cursor = "|" if int(time.time() * 2) % 2 == 0 else " "
+        screen.blit(chat_font.render(chat_input + cursor, True, CHAT_TEXT_COLOR), (CHAT_X + CHAT_PADDING, input_y + CHAT_PADDING))
 # ---------------- MAIN GAME LOOP ---------------- #
 
 def main():
@@ -373,6 +417,10 @@ def main():
     game_map = load_map("map.txt")
 
     player = Player(128, 128)
+    chat_font = pygame.font.SysFont("monospace", CHAT_FONT_SIZE)
+    chat_open = False
+    chat_input = ""
+    chat_messages = []
     start_quic_thread()
     outgoing_messages.put(f"Connected|{player.x},{player.y}|{player.hp}")
     outgoing_messages.put(f"UPDATE|{player.x},{player.y}")
@@ -387,7 +435,7 @@ def main():
     remote_players = {}
     # Loot pool (מאגר פריטים)
     loot_pool = [
-        ("weapon", "Gun", gun1_img),
+        ("weapon", "gun", gun1_img),
         ("weapon", "shotGun", gun2_img),
     ]
 
@@ -404,6 +452,26 @@ def main():
                 running = False
 
             if event.type == pygame.KEYDOWN:
+                if chat_open:
+                    if event.key == pygame.K_RETURN:
+                        if chat_input.strip():
+                            outgoing_messages.put(f"CHAT|{chat_input.strip()}")
+                        chat_input = ""
+                        chat_open = False
+                    elif event.key == pygame.K_ESCAPE:
+                        chat_input = ""
+                        chat_open = False
+                    elif event.key == pygame.K_BACKSPACE:
+                        chat_input = chat_input[:-1]
+                    elif len(chat_input) < CHAT_INPUT_MAX_LEN and event.unicode.isprintable():
+                        chat_input += event.unicode
+                    continue  # block all other keys while typing
+
+                if event.key == pygame.K_t:
+                    chat_open = True
+                    chat_input = ""
+
+
                 if event.key == pygame.K_n:
                     player.auto_walk = not player.auto_walk
                     print("Auto-walk:", player.auto_walk)
@@ -438,8 +506,9 @@ def main():
                     if len(player.inventory) >= 5:
                         player.selected_slot = 4
 
-        keys = pygame.key.get_pressed()
-        player.move(keys, game_map, tile_size)
+        if not chat_open:
+            keys = pygame.key.get_pressed()
+            player.move(keys, game_map, tile_size)
 
         while not incoming_messages.empty():
             msg = incoming_messages.get()
@@ -466,10 +535,13 @@ def main():
                     continue
                 player_id = parts[1]
                 if player_id in remote_players:
+                    del remote_players[player_id]
                     if player_id == MY_ID:
                         pygame.quit();exit()
-                    else:
-                        del remote_players[player_id]
+                else:
+                    if player_id == MY_ID:
+                        pygame.quit();exit()
+
 
             elif parts[0] == "DROPPED":
                 if len(parts) < 3:
@@ -499,6 +571,15 @@ def main():
                     if item.x==x_pick and item.y == y_pick and item.name == type_pick:
                         loot_items.remove(item)
                         break
+
+            elif parts[0] == "CHAT":
+                if len(parts) < 3:
+                    continue
+                sender_id = parts[1]
+                short_id = sender_id[-6:] if len(sender_id) >= 6 else sender_id
+                display_name = "You" if sender_id == MY_ID else short_id
+                chat_messages.append((f"<{display_name}> {parts[2]}", time.time()))
+
             elif parts[0] == "SETID":
                 if MY_ID == "":
                     MY_ID = parts[1]
@@ -520,7 +601,7 @@ def main():
         for rp in remote_players.values():
             rp.draw(screen, camera_x, camera_y)
         draw_inventory(screen, player)
-
+        draw_chat(screen, chat_font, chat_messages, chat_open, chat_input)
         pygame.display.flip()
         clock.tick(60)
 
