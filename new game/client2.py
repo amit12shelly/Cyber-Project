@@ -446,11 +446,7 @@ def main():
             print(msg)
             parts = msg.split("|")
             if not parts:
-                if "disconnected" in msg:
-                    if msg.split(" ")[0] == MY_ID:
-                        pygame.quit(); exit()
-                else:
-                    continue
+                continue
 
             if parts[0] == "UPDATE":
                 if len(parts) < 4:
@@ -466,13 +462,15 @@ def main():
                     remote_players[player_id].update_from_server(x, y, hp)
 
             elif parts[0] == "REMOVE":
-                print("good1")
                 if len(parts) < 2:
                     continue
-                print("good2")
                 player_id = parts[1]
                 if player_id in remote_players:
-                    del remote_players[player_id]
+                    if player_id == MY_ID:
+                        pygame.quit();exit()
+                    else:
+                        del remote_players[player_id]
+
             elif parts[0] == "DROPPED":
                 if len(parts) < 3:
                     continue
