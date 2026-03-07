@@ -10,6 +10,7 @@ from aioquic.quic.configuration import QuicConfiguration
 SERVER_IP = "127.0.0.1"
 SERVER_PORT = 4433
 TOLERANCE = 5
+MY_ID = ""
 incoming_messages = Queue()
 outgoing_messages = Queue()
 
@@ -357,6 +358,7 @@ class RemotePlayer:
 # ---------------- MAIN GAME LOOP ---------------- #
 
 def main():
+    global MY_ID
     pygame.init()
     screen = pygame.display.set_mode((1280, 720))
     pygame.display.set_caption("Game")
@@ -444,7 +446,11 @@ def main():
             print(msg)
             parts = msg.split("|")
             if not parts:
-                continue
+                if "disconnected" in msg:
+                    if msg.split(" ")[0] == MY_ID:
+                        pygame.quit(); exit()
+                else:
+                    continue
 
             if parts[0] == "UPDATE":
                 if len(parts) < 4:
@@ -495,6 +501,9 @@ def main():
                     if item.x==x_pick and item.y == y_pick and item.name == type_pick:
                         loot_items.remove(item)
                         break
+            elif parts[0] == "SETID":
+                if MY_ID == "":
+                    MY_ID = parts[1]
 
 
 
