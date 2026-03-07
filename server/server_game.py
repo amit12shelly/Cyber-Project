@@ -89,7 +89,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
             state.players_inventory[client_id] = {int(i): "none" for i in range(INVENTORY_SIZE)}
 
-            id_msg = f"SETID|{client_id}".encode()
+            id_msg = f"SETID|{client_id}\n".encode()
             self._quic.send_stream_data(0, id_msg, end_stream=False)
 
             # send existing players to new player
@@ -318,7 +318,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
     def disconnect(self):
         client_id = self._quic.host_cid.hex()
         self.broadcast_remove(client_id)
-        
+
         if client_id in state.players_pos:
             del state.players_pos[client_id]
         if client_id in state.players_hp:
