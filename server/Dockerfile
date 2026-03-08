@@ -12,4 +12,4 @@ RUN pip install aioquic
 RUN pip install psutil
 
 
-CMD ["python", "main.py"]
+CMD ["python", "server_game.py"]
