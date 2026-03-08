@@ -454,7 +454,7 @@ def draw_bullet(screen, bullet_img, x, y, angle, camera_x, camera_y):
 
 def get_next_bullet_position(x, y, angle_degrees):
     angle_rad = math.radians(angle_degrees)
-    return x + math.cos(angle_rad), y + math.sin(angle_rad)
+    return x + math.cos(angle_rad)*15, y + math.sin(angle_rad)*15
 # ---------------- MAIN GAME LOOP ---------------- #
 
 def main():
@@ -615,11 +615,14 @@ def main():
                 x, y = map(float, parts[2].split(","))
                 hp = int(parts[3])
 
-                if player_id not in remote_players:
-                    remote_players[player_id] = RemotePlayer(x, y, hp, player.base_sprites)
-                    outgoing_messages.put(f"UPDATE|{player.x},{player.y}")
+                if player_id == MY_ID:
+                    player.hp = hp
                 else:
-                    remote_players[player_id].update_from_server(x, y, hp)
+                    if player_id not in remote_players:
+                        remote_players[player_id] = RemotePlayer(x, y, hp, player.base_sprites)
+                        outgoing_messages.put(f"UPDATE|{player.x},{player.y}")
+                    else:
+                        remote_players[player_id].update_from_server(x, y, hp)
 
             elif parts[0] == "REMOVE":
                 if len(parts) < 2:

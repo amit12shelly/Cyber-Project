@@ -3,6 +3,7 @@ import random
 import threading
 import asyncio
 import queue
+import math
 from queue import Queue
 from aioquic.asyncio import connect
 from aioquic.quic.configuration import QuicConfiguration
@@ -24,6 +25,7 @@ CHAT_PADDING = 6
 CHAT_MSG_HEIGHT = 22
 CHAT_X = 10
 CHAT_Y_BOTTOM_OFFSET = 120
+BULLETS = []
 
 
 async def quic_network_loop():
@@ -230,7 +232,7 @@ class Player:
         self.wander_timer = 0
 
         self.inventory = []  # כאן נשמור את כל הנשקים שהשחקן אוסף
-        self.selected_slot = 0  # איזה סלוט מחובר כרגע (אם רוצים לירות ממנו)
+        self.selected_slot =0   # איזה סלוט מחובר כרגע (אם רוצים לירות ממנו)
 
     def pick_item(self, item):
         self.inventory.append(item)
@@ -430,6 +432,29 @@ def draw_fps(screen, clock, font):
 
     # ציור הטקסט עצמו
     screen.blit(fps_surface, (10 + padding, 10 + padding // 2))
+
+
+def draw_bullet(screen, bullet_img, x, y, angle, camera_x, camera_y):
+    """
+    מציירת קליע בודד מסובב לפי הזווית שלו.
+    """
+    # 1. סיבוב התמונה לפי הזווית (Pygame מסובב נגד כיוון השעון, לכן נשים מינוס)
+    # אנחנו משתמשים ב-rotozoom לאיכות טובה יותר או ב-rotate הפשוט
+    rotated_bullet = pygame.transform.rotate(bullet_img, -angle)
+
+    # 2. חישוב המיקום על המסך (הפחתת המצלמה)
+    draw_x = x - camera_x
+    draw_y = y - camera_y
+
+    # 3. מירכוז התמונה המסובבת כדי שלא "תקפוץ" בזמן סיבוב
+    rect = rotated_bullet.get_rect(center=(draw_x, draw_y))
+
+    # 4. הציור בפועל
+    screen.blit(rotated_bullet, rect)
+
+def get_next_bullet_position(x, y, angle_degrees):
+    angle_rad = math.radians(angle_degrees)
+    return x + math.cos(angle_rad), y + math.sin(angle_rad)
 # ---------------- MAIN GAME LOOP ---------------- #
 
 def main():
@@ -443,8 +468,12 @@ def main():
     floor_img = pygame.image.load("img/DesertTile.png").convert()
     wall_img = pygame.image.load("img/watertile.png").convert()
 
+    bullet_img = pygame.image.load("img/bullet.png").convert()
+
+
     floor_img = pygame.transform.scale(floor_img, (tile_size, tile_size))
     wall_img = pygame.transform.scale(wall_img, (tile_size, tile_size))
+    bullet_img = pygame.transform.scale(bullet_img, (10.7 ,5.4))
     game_map = load_map("map.txt")
 
     player = Player(128, 128)
@@ -474,6 +503,7 @@ def main():
     loot_items = []
     # print("Loot spawned:", len(loot_items))
     # print("First loot at:", loot_items[0].x, loot_items[0].y)
+    bullets = {} #bullet id -> {x,y,angle}
 
     running = True
     while running:
@@ -513,14 +543,16 @@ def main():
                         player.pick_item(nearby)  # מוסיף ל־Inventory
                         loot_items.remove(nearby)
                         outgoing_messages.put(f"PICKUP|{nearby.x},{nearby.y}|{nearby.name}")
+
                 if event.key == pygame.K_q:
-                    gun_slot = player.drop_selected_weapon()
-                    if gun_slot:
-                        gun_slot.x=player.x
-                        gun_slot.y=player.y
-                        loot_items.append(gun_slot)
-                        outgoing_messages.put(f"DROP|{gun_slot.x},{gun_slot.y}|{gun_slot}")
-                        print(f"Dropped {gun_slot.name}")
+                    slot_to_drop = player.selected_slot
+                    gun = player.drop_selected_weapon()
+                    if gun:
+                        dropped = Item(player.x, player.y,gun.image,"weapon", gun.name)
+                        loot_items.append(dropped)
+                        print("i want to drop")
+                        outgoing_messages.put(f"DROP|{player.x},{player.y}|{slot_to_drop}")
+                        print(f"Dropped {gun.name}")
 
                 elif event.key == pygame.K_1:
                     if len(player.inventory) >= 1:
@@ -537,6 +569,33 @@ def main():
                 elif event.key == pygame.K_5:
                     if len(player.inventory) >= 5:
                         player.selected_slot = 4
+
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+
+                if event.button == 1:  # Left mouse button
+
+                    current_camera_x = player.x - screen.get_width() // 2
+                    current_camera_y = player.y - screen.get_height() // 2
+
+                    mouse_x, mouse_y = pygame.mouse.get_pos()
+
+                    world_mouse_x = mouse_x + current_camera_x
+                    world_mouse_y = mouse_y + current_camera_y
+
+                    player_center_x = player.x + (player.size // 2)
+                    player_center_y = player.y + (player.size // 2)
+
+                    dx = world_mouse_x - player_center_x
+                    dy = world_mouse_y - player_center_y
+
+
+                    angle_radians = math.atan2(dy, dx)
+
+                    angle_degrees = math.degrees(angle_radians)
+
+                    outgoing_messages.put(f"ATTACK|{player.selected_slot}|{angle_degrees}")
+
+
 
         if not chat_open:
             keys = pygame.key.get_pressed()
@@ -574,6 +633,20 @@ def main():
                     if player_id == MY_ID:
                         pygame.quit();exit()
 
+            elif parts[0] == "SHOW-BULLET":
+                if len(parts) < 4:
+                    continue
+                bullet_x = parts[1].split(',')[0]
+                bullet_y = parts[1].split(',')[1]
+                bullets[parts[3]] = {"x": bullet_x, "y": bullet_y ,"angle": parts[2]}
+
+            elif parts[0] == "DEL-BULLET":
+                if len(parts) < 2:
+                    continue
+                try:
+                    del bullets[parts[1]]
+                except:
+                    pass
 
             elif parts[0] == "DROPPED":
                 if len(parts) < 3:
@@ -598,7 +671,6 @@ def main():
                 x_pick = float(x_pick)
                 y_pick = float(y_pick)
                 type_pick = parts[2]
-
 
                 for item in loot_items:
                     if item.x==x_pick and item.y == y_pick and item.name == type_pick:
@@ -632,10 +704,31 @@ def main():
         for rp in remote_players.values():
             rp.draw(screen, camera_x, camera_y)
 
+
+        # calculate the bullets movements and show them
+        for i in bullets:
+            bullet_x = float(bullets[i]["x"])
+            bullet_y = float(bullets[i]["y"])
+            bullet_angle = float(bullets[i]["angle"])
+
+            draw_bullet(screen, bullet_img, bullet_x, bullet_y, bullet_angle, camera_x, camera_y)
+
+            new_x, new_y = get_next_bullet_position(bullet_x, bullet_y, bullet_angle)
+            bullets[i]["x"] = new_x
+            bullets[i]["y"] = new_y
+
+            #if on player/outside the map/on water:
+            #del bullets[i]
+
+
         draw_fps(screen, clock, chat_font)
         draw_inventory(screen, player)
         draw_chat(screen, chat_font, chat_messages, chat_open, chat_input)
         pygame.display.flip()
+
+
+
+
         clock.tick(60)
 
     pygame.quit()

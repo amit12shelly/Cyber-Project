@@ -13,7 +13,7 @@ INVENTORY_SIZE = 5
 MAX_BULLETS = 1000
 TILE_SIZE = 64
 TOLERANCE = 70
-BULLETS_MOVE_TIME = 0.005
+BULLETS_MOVE_TIME = 0.01
 MONSTERS_AMOUNT = 100
 SCREEN_WIDTH = 1920
 SCREEN_HEIGHT = 1080
@@ -467,10 +467,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 inv_slot += 1
 
             self.broadcast_remove(client_id)
-            state.players_pos[client_id] = "0,0"
-            state.players_hp[client_id] = "100"
             print("player killed!")
-            self.broadcast_player(client_id, state.players_pos[client_id], state.players_hp[client_id], True)
         else:
             state.players_hp[client_id] = hp - damage
             self.broadcast_player(client_id, state.players_pos[client_id], state.players_hp[client_id], True)
@@ -581,7 +578,7 @@ def A_star_algorythm(start, target):
 
 def get_next_bullet_position(x, y, angle_degrees):
     angle_rad = math.radians(angle_degrees)
-    return x + math.cos(angle_rad), y + math.sin(angle_rad)
+    return x + math.cos(angle_rad)*15 , y + math.sin(angle_rad)*15
 
 
 def check_movement(new_pos, old_pos):
