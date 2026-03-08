@@ -232,7 +232,7 @@ class Player:
         self.wander_timer = 0
 
         self.inventory = []  # כאן נשמור את כל הנשקים שהשחקן אוסף
-        self.selected_slot = 0  # איזה סלוט מחובר כרגע (אם רוצים לירות ממנו)
+        self.selected_slot =0   # איזה סלוט מחובר כרגע (אם רוצים לירות ממנו)
 
     def pick_item(self, item):
         self.inventory.append(item)
@@ -522,14 +522,14 @@ def main():
                         outgoing_messages.put(f"PICKUP|{nearby.x},{nearby.y}|{nearby.name}")
 
                 if event.key == pygame.K_q:
-                    gun_slot = player.drop_selected_weapon()
-                    if gun_slot:
-                        gun_slot.x = player.x
-                        gun_slot.y = player.y
-                        loot_items.append(gun_slot)
+                    slot_to_drop = player.selected_slot
+                    gun = player.drop_selected_weapon()
+                    if gun:
+                        dropped = Item(player.x, player.y,gun.image,"weapon", gun.name)
+                        loot_items.append(dropped)
                         print("i want to drop")
-                        outgoing_messages.put(f"DROP|{gun_slot.x},{gun_slot.y}|{player.selected_slot+1}")
-                        print(f"Dropped {gun_slot.name}")
+                        outgoing_messages.put(f"DROP|{player.x},{player.y}|{slot_to_drop}")
+                        print(f"Dropped {gun.name}")
 
                 elif event.key == pygame.K_1:
                     if len(player.inventory) >= 1:
@@ -546,8 +546,6 @@ def main():
                 elif event.key == pygame.K_5:
                     if len(player.inventory) >= 5:
                         player.selected_slot = 4
-
-
 
             elif event.type == pygame.MOUSEBUTTONDOWN:
 
@@ -676,7 +674,7 @@ def main():
 
         for b in bullets:
             # בודקים אם עברו פחות מ-0.2 שניות
-            if current_time - b["time"] < 0.008:
+            if current_time - b["time"] < 0.007:
                 alive_bullets.append(b)  # שומרים את הקליע
                 try:
                     bx, by = map(float, b["pos"].split(","))
