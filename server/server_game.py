@@ -95,7 +95,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 state.players_pos[client_id] = parts[1]
                 state.players_hp[client_id] = parts[2]
 
-            state.players_inventory[client_id] = {int(i): "none" for i in range(INVENTORY_SIZE)}
+            state.players_inventory[client_id] = {i: "none" for i in range(INVENTORY_SIZE)}
 
             id_msg = f"SETID|{client_id}\n".encode()
             if self.stream_id is not None:
@@ -211,9 +211,9 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
                 if found_weapon_id is not None:  # if its real
 
-                    for slot in range(1,INVENTORY_SIZE+1):
+                    for slot in range(INVENTORY_SIZE):
 
-                        if state.players_inventory[self._quic.host_cid.hex()].get(slot) == "none":
+                        if state.players_inventory[self._quic.host_cid.hex()][slot] == "none":
                             state.players_inventory[self._quic.host_cid.hex()][slot] = pickup_type
                             pos_str = f"{state.map_weapons[found_weapon_id]['x']},{state.map_weapons[found_weapon_id]['y']}"
                             self.broadcast_undrop(pos_str, state.map_weapons[found_weapon_id]["type"])
@@ -423,8 +423,8 @@ class EchoQuicProtocol(QuicConnectionProtocol):
         if hp - damage <= 0:
             pos = state.players_pos[client_id]
             dropped = 0
-            inv_slot = 1
-            while dropped < AMOUNT_TO_DROP_IN_DEATH or inv_slot < INVENTORY_SIZE:
+            inv_slot = 0
+            while dropped < AMOUNT_TO_DROP_IN_DEATH and inv_slot < INVENTORY_SIZE:
                 item = state.players_inventory[client_id].get(inv_slot)
                 if item != "none":
                     new_id = random.randint(1, 1000000)
@@ -446,7 +446,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 inv_slot += 1
 
 
-            inv_slot = 1
+            inv_slot = 0
             while inv_slot < INVENTORY_SIZE:
                 state.players_inventory[client_id][inv_slot] = "none"
                 inv_slot += 1
