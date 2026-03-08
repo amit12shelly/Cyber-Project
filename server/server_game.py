@@ -76,8 +76,6 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             self.disconnect()
 
     def handle_message(self, data_str: str):
-        client_id = self._quic.host_cid.hex()
-
         # CONNECTED
         print(data_str)
         if data_str.startswith("Connected"):
@@ -103,7 +101,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
             # send existing players to new player
             for other_id, pos in state.players_pos.items():
-                if other_id == client_id:
+                if other_id == self._quic.host_cid.hex():
                     continue
                 hp = state.players_hp.get(other_id, "100")
                 msg = f"UPDATE|{other_id}|{pos}|{hp}\n".encode()
@@ -117,7 +115,9 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                     self._quic.send_stream_data(self.stream_id, msg, end_stream=False)
 
             # tell others about new player
-            self.broadcast_player(client_id, state.players_pos[client_id], state.players_hp[client_id], False)
+            self.broadcast_player(self._quic.host_cid.hex(), state.players_pos[self._quic.host_cid.hex()],
+                                  state.players_hp[
+                                      self._quic.host_cid.hex()], False)
             self.transmit()
 
         # MOVEMENT
@@ -131,7 +131,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 return
             new_pos = parts[1]
 
-            if client_id not in state.players_pos:
+            if self._quic.host_cid.hex() not in state.players_pos:
                 return
             for other_id, other_pos in list(state.players_pos.items()):
                 if other_id == self._quic.host_cid.hex():
@@ -141,9 +141,10 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                     print("player has been kicked! player collision")
                     return
 
-            if check_movement(new_pos, state.players_pos[client_id]):
-                state.players_pos[client_id] = new_pos
-                self.broadcast_player(client_id, new_pos, state.players_hp[client_id], False)
+            if check_movement(new_pos, state.players_pos[self._quic.host_cid.hex()]):
+                state.players_pos[self._quic.host_cid.hex()] = new_pos
+                self.broadcast_player(self._quic.host_cid.hex(), new_pos, state.players_hp[self._quic.host_cid.hex()],
+                                      False)
             else:
                 self.disconnect() #kick the player
                 print("player has been kicked! movement problem")
