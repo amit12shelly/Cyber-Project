@@ -156,7 +156,8 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 return
             if len(parts) < 3:
                 return
-            weapon = parts[1]
+            weapon_slot = parts[1]
+            weapon = state.players_inventory[client_id][weapon_slot]
             if weapon in WEAPON_NAMES:
                 new_id = random.randint(1, MAX_BULLETS)
                 while new_id in state.active_bullets:
