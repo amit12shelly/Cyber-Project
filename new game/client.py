@@ -232,7 +232,7 @@ class Player:
         self.wander_timer = 0
 
         self.inventory = []  # כאן נשמור את כל הנשקים שהשחקן אוסף
-        self.selected_slot = 0  # איזה סלוט מחובר כרגע (אם רוצים לירות ממנו)
+        self.selected_slot =0   # איזה סלוט מחובר כרגע (אם רוצים לירות ממנו)
 
     def pick_item(self, item):
         self.inventory.append(item)
@@ -484,7 +484,6 @@ def main():
 
     running = True
     while running:
-        player.selected_slot = 0
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 outgoing_messages.put(f"Disconnected")
@@ -523,13 +522,13 @@ def main():
                         outgoing_messages.put(f"PICKUP|{nearby.x},{nearby.y}|{nearby.name}")
 
                 if event.key == pygame.K_q:
-                    slot_to_drop = player.selected_slot + 1
+                    slot_to_drop = player.selected_slot
                     gun = player.drop_selected_weapon()
                     if gun:
                         dropped = Item(player.x, player.y,gun.image,"weapon", gun.name)
                         loot_items.append(dropped)
                         print("i want to drop")
-                        outgoing_messages.put(f"DROP|{player.x},{player.y}|{player.selected_slot+1}")
+                        outgoing_messages.put(f"DROP|{player.x},{player.y}|{slot_to_drop}")
                         print(f"Dropped {gun.name}")
 
                 elif event.key == pygame.K_1:
@@ -547,8 +546,6 @@ def main():
                 elif event.key == pygame.K_5:
                     if len(player.inventory) >= 5:
                         player.selected_slot = 4
-
-
 
             elif event.type == pygame.MOUSEBUTTONDOWN:
 

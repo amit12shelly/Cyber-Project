@@ -95,7 +95,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 state.players_pos[client_id] = parts[1]
                 state.players_hp[client_id] = parts[2]
 
-            state.players_inventory[client_id] = {i: "none" for i in range(INVENTORY_SIZE)}
+            state.players_inventory[client_id] = {int(i): "none" for i in range(INVENTORY_SIZE)}
 
             id_msg = f"SETID|{client_id}\n".encode()
             if self.stream_id is not None:
