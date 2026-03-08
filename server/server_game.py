@@ -2,6 +2,7 @@ import asyncio
 import math
 import random
 import psutil
+import heapq
 
 from aioquic.asyncio import QuicConnectionProtocol, serve
 from aioquic.quic.configuration import QuicConfiguration
@@ -22,6 +23,8 @@ SCREEN_WIDTH = 1920
 SCREEN_HEIGHT = 1080
 MAX_WEAPONS = 10000
 AMOUNT_TO_DROP_IN_DEATH = 2
+ENTITIES_SPEED = 4
+
 
 def load_map():
     with open("map.txt", "r") as f:
@@ -457,8 +460,16 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
 
 # ---------- Utils ---------- #
+class Node:
+  def __init__(self, data):
+    self.data = data
+    self.next = None
+
+def pitagoras(x,y):
+    return math.sqrt((x*x)+(y*y))
+
 def check_if_in_map(x, y):
-    x = int(float(x) / TILE_SIZE)
+    x = int(float(x)/ TILE_SIZE)
     y = int(float(y) / TILE_SIZE)
     if y >= len(state.game_map):
         return False
@@ -469,7 +480,86 @@ def check_if_in_map(x, y):
     elif x < 0:
         return False
 
+
     return True
+
+def find_nearest_player(monster_x, monster_y):
+    min_x = 10000000
+    min_y = 10000000
+    for other_id, pos in state.players_pos.items():
+        player_x = pos.split(",")[0]
+        player_y = pos.split(",")[1]
+        if (player_x*player_x + player_y*player_y) < (min_x*min_x + min_y*min_y):
+            min_x = player_x
+            min_y = player_y
+    return min_x, min_y
+
+def find_neighbors(current_node, target):
+    neighbor_nodes = []
+
+    cx, cy, g = current_node.data[0], current_node.data[1], current_node.data[2]
+
+    for i in range(3):
+        for j in range(3):
+            dx = (j-1) * ENTITIES_SPEED
+            dy = (i-1) * ENTITIES_SPEED
+
+            if dx == 0 and dy == 0:
+                continue
+
+            nx = cx + dx
+            ny = cy + dy
+
+            step_cost = pitagoras(dx, dy)
+            G_cost = g + step_cost
+
+            H_cost = pitagoras(target[0] - nx, target[1] - ny)
+            F_cost = G_cost + H_cost
+
+            neighbor_node = Node((nx, ny, G_cost, H_cost, F_cost))
+            neighbor_node.next = current_node
+
+            neighbor_nodes.append(neighbor_node)
+
+    return neighbor_nodes
+
+def A_star_algorythm(start, target):
+
+    open_heap = []
+    closed_set = set()
+
+    start_h = pitagoras(target[0]-start[0], target[1]-start[1])
+    start_node = Node((start[0], start[1], 0, start_h, start_h))
+
+    heapq.heappush(open_heap, (start_node.data[4], start_node))
+
+    while open_heap:
+
+        _, current_node = heapq.heappop(open_heap)
+
+        cx, cy = current_node.data[0], current_node.data[1]
+
+        if (cx, cy) in closed_set:
+            continue
+
+        closed_set.add((cx, cy))
+
+        if current_node.data[3] < TILE_SIZE:
+            return current_node
+
+        neighbors = find_neighbors(current_node, target)
+
+        for neighbor in neighbors:
+
+            nx, ny = neighbor.data[0], neighbor.data[1]
+
+            # wall check can go here later
+            # if is_wall(nx, ny): continue
+
+            if (nx, ny) in closed_set:
+                continue
+
+            heapq.heappush(open_heap, (neighbor.data[4], neighbor))
 
 
 def get_next_bullet_position(x, y, angle_degrees):
@@ -561,7 +651,15 @@ def spawn_loot_per_camera_zone(game_map, per_zone=2):
 
                     spawned += 1
 
-
+def monsters_manager():
+    while True:
+        for i in range(MONSTERS_AMOUNT):
+            monster_x = state.monsters[i+1]["x"]
+            monster_y = state.monsters[i+1]["y"]
+            player_x, player_y = find_nearest_player(monster_x, monster_y)
+            monster_pos = monster_x + "," + monster_y
+            player_pos = str(player_x) + "," + str(player_y)
+            node = A_star_algorythm(monster_pos , player_pos)
 # ---------- Server entry ---------- #
 
 async def check_cpu():
