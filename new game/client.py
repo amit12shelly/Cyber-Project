@@ -3,6 +3,7 @@ import random
 import threading
 import asyncio
 import queue
+import math
 from queue import Queue
 from aioquic.asyncio import connect
 from aioquic.quic.configuration import QuicConfiguration
@@ -24,6 +25,7 @@ CHAT_PADDING = 6
 CHAT_MSG_HEIGHT = 22
 CHAT_X = 10
 CHAT_Y_BOTTOM_OFFSET = 120
+BULLETS = []
 
 
 async def quic_network_loop():
@@ -443,8 +445,12 @@ def main():
     floor_img = pygame.image.load("img/DesertTile.png").convert()
     wall_img = pygame.image.load("img/watertile.png").convert()
 
+    bullet_img = pygame.image.load("img/bullet.png").convert()
+
+
     floor_img = pygame.transform.scale(floor_img, (tile_size, tile_size))
     wall_img = pygame.transform.scale(wall_img, (tile_size, tile_size))
+    bullet_img = pygame.transform.scale(bullet_img, (10.7 ,5.4))
     game_map = load_map("map.txt")
 
     player = Player(128, 128)
@@ -474,6 +480,7 @@ def main():
     loot_items = []
     # print("Loot spawned:", len(loot_items))
     # print("First loot at:", loot_items[0].x, loot_items[0].y)
+    bullets = []
 
     running = True
     while running:
@@ -541,6 +548,35 @@ def main():
                     if len(player.inventory) >= 5:
                         player.selected_slot = 4
 
+
+
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+
+                if event.button == 1:  # Left mouse button
+
+                    current_camera_x = player.x - screen.get_width() // 2
+                    current_camera_y = player.y - screen.get_height() // 2
+
+                    mouse_x, mouse_y = pygame.mouse.get_pos()
+
+                    world_mouse_x = mouse_x + current_camera_x
+                    world_mouse_y = mouse_y + current_camera_y
+
+                    player_center_x = player.x + (player.size // 2)
+                    player_center_y = player.y + (player.size // 2)
+
+                    dx = world_mouse_x - player_center_x
+                    dy = world_mouse_y - player_center_y
+
+
+                    angle_radians = math.atan2(dy, dx)
+
+                    angle_degrees = math.degrees(angle_radians)
+
+                    outgoing_messages.put(f"ATTACK|{player.selected_slot}|{angle_degrees}")
+
+
+
         if not chat_open:
             keys = pygame.key.get_pressed()
             player.move(keys, game_map, tile_size)
@@ -577,6 +613,8 @@ def main():
                     if player_id == MY_ID:
                         pygame.quit();exit()
 
+            elif parts[0] == "SHOWBULLET":
+                bullets.append({"pos": parts[1], "time": time.time()})
 
             elif parts[0] == "DROPPED":
                 if len(parts) < 3:
@@ -633,6 +671,22 @@ def main():
         player.draw(screen, camera_x, camera_y)
         for rp in remote_players.values():
             rp.draw(screen, camera_x, camera_y)
+
+        current_time = time.time()
+        alive_bullets = []  # רשימה שתשמור רק קליעים שעוד לא נעלמו
+
+        for b in bullets:
+            # בודקים אם עברו פחות מ-0.2 שניות
+            if current_time - b["time"] < 0.007:
+                alive_bullets.append(b)  # שומרים את הקליע
+                try:
+                    bx, by = map(float, b["pos"].split(","))
+                    screen.blit(bullet_img, (bx - camera_x, by - camera_y))
+                except Exception as e:
+                    pass
+
+        # מעדכנים את הרשימה הראשית שתכיל רק את הקליעים ששרדו
+        bullets = alive_bullets
 
         draw_fps(screen, clock, chat_font)
         draw_inventory(screen, player)
