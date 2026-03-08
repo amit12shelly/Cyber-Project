@@ -674,7 +674,7 @@ def main():
 
         for b in bullets:
             # בודקים אם עברו פחות מ-0.2 שניות
-            if current_time - b["time"] < 0.007:
+            if current_time - b["time"] < 0.01:
                 alive_bullets.append(b)  # שומרים את הקליע
                 try:
                     bx, by = map(float, b["pos"].split(","))

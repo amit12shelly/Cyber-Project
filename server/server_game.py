@@ -13,7 +13,7 @@ INVENTORY_SIZE = 5
 MAX_BULLETS = 1000
 TILE_SIZE = 64
 TOLERANCE = 70
-BULLETS_MOVE_TIME = 0.007
+BULLETS_MOVE_TIME = 0.01
 MONSTERS_AMOUNT = 100
 SCREEN_WIDTH = 1920
 SCREEN_HEIGHT = 1080
@@ -77,6 +77,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
     def handle_message(self, data_str: str):
         # CONNECTED
+        client_id = self._quic.host_cid.hex()
         print(data_str)
         if data_str.startswith("Connected"):
             print(client_id, "connected!")
