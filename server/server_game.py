@@ -10,20 +10,20 @@ from aioquic.quic.events import StreamDataReceived, QuicEvent, ConnectionTermina
 
 #----------server settings----------
 INVENTORY_SIZE = 5
-WEAPON_LIST = [["gun", 20, 20]]  #-> name,damage,range
-WEAPON_NAMES = [w[0] for w in WEAPON_LIST]
-WEAPON_DAMAGE = [w[1] for w in WEAPON_LIST]
-WEAPON_RANGE = [w[2] for w in WEAPON_LIST]
 MAX_BULLETS = 1000
 TILE_SIZE = 64
 TOLERANCE = 70
-BULLETS_MOVE_TIME = 0.2
+BULLETS_MOVE_TIME = 0.007
 MONSTERS_AMOUNT = 100
 SCREEN_WIDTH = 1920
 SCREEN_HEIGHT = 1080
 MAX_WEAPONS = 10000
 AMOUNT_TO_DROP_IN_DEATH = 2
 ENTITIES_SPEED = 4
+WEAPON_LIST = [["gun", 20, TILE_SIZE * 10]]  #-> name,damage,range
+WEAPON_NAMES = [w[0] for w in WEAPON_LIST]
+WEAPON_DAMAGE = [w[1] for w in WEAPON_LIST]
+WEAPON_RANGE = [w[2] for w in WEAPON_LIST]
 
 
 def load_map():
@@ -95,7 +95,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 state.players_pos[client_id] = parts[1]
                 state.players_hp[client_id] = parts[2]
 
-            state.players_inventory[client_id] = {int(i): "none" for i in range(1, INVENTORY_SIZE + 1)}
+            state.players_inventory[client_id] = {int(i): "none" for i in range(INVENTORY_SIZE)}
 
             id_msg = f"SETID|{client_id}\n".encode()
             self._quic.send_stream_data(0, id_msg, end_stream=False)
@@ -157,7 +157,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             if len(parts) < 3:
                 return
             weapon_slot = parts[1]
-            weapon = state.players_inventory[client_id][weapon_slot]
+            weapon = state.players_inventory[client_id][int(weapon_slot)]
             if weapon in WEAPON_NAMES:
                 new_id = random.randint(1, MAX_BULLETS)
                 while new_id in state.active_bullets:
@@ -246,7 +246,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 print("Error while splitting the pos in the DROP command!")
                 return
             weapon_slot = int(parts[2])
-            drop = state.players_inventory[self._quic.host_cid.hex()].get(weapon_slot)
+            drop = state.players_inventory[self._quic.host_cid.hex()][weapon_slot]
             if drop in WEAPON_NAMES:
 
                 if drop != "none":  # if he has something to drop
