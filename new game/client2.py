@@ -474,7 +474,6 @@ def main():
     loot_items = []
     # print("Loot spawned:", len(loot_items))
     # print("First loot at:", loot_items[0].x, loot_items[0].y)
-
     running = True
     while running:
         for event in pygame.event.get():
@@ -513,12 +512,15 @@ def main():
                         player.pick_item(nearby)  # מוסיף ל־Inventory
                         loot_items.remove(nearby)
                         outgoing_messages.put(f"PICKUP|{nearby.x},{nearby.y}|{nearby.name}")
+
                 if event.key == pygame.K_q:
                     gun_slot = player.drop_selected_weapon()
                     if gun_slot:
-                        gun_slot.x=player.x
-                        gun_slot.y=player.y
+                        gun_slot.x = player.x
+                        gun_slot.y = player.y
                         loot_items.append(gun_slot)
+                        print("i want to drop")
+                        outgoing_messages.put(f"DROP|{gun_slot.x},{gun_slot.y}|{player.selected_slot+1}")
                         print(f"Dropped {gun_slot.name}")
 
                 elif event.key == pygame.K_1:
@@ -614,8 +616,6 @@ def main():
             elif parts[0] == "SETID":
                 if MY_ID == "":
                     MY_ID = parts[1]
-
-
 
         # --- CAMERA FOLLOWS PLAYER ---
         camera_x = player.x - screen.get_width() // 2

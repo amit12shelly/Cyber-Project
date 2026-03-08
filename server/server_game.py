@@ -98,7 +98,8 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             state.players_inventory[client_id] = {int(i): "none" for i in range(1, INVENTORY_SIZE + 1)}
 
             id_msg = f"SETID|{client_id}\n".encode()
-            self._quic.send_stream_data(0, id_msg, end_stream=False)
+            if self.stream_id is not None:
+                self._quic.send_stream_data(self.stream_id, id_msg, end_stream=False)
 
             # send existing players to new player
             for other_id, pos in state.players_pos.items():
@@ -209,7 +210,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
                 if found_weapon_id is not None:  # if its real
 
-                    for slot in range(INVENTORY_SIZE):
+                    for slot in range(1,INVENTORY_SIZE+1):
 
                         if state.players_inventory[self._quic.host_cid.hex()].get(slot) == "none":
                             state.players_inventory[self._quic.host_cid.hex()][slot] = pickup_type
@@ -245,7 +246,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 print("Error while splitting the pos in the DROP command!")
                 return
             weapon_slot = int(parts[2])
-            drop = state.players_inventory[self._quic.host_cid.hex()].get(weapon_slot)
+            drop = state.players_inventory[self._quic.host_cid.hex()][weapon_slot]
             if drop in WEAPON_NAMES:
 
                 if drop != "none":  # if he has something to drop

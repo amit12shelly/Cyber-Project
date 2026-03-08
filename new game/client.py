@@ -477,6 +477,7 @@ def main():
 
     running = True
     while running:
+        player.selected_slot = 0
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 outgoing_messages.put(f"Disconnected")
@@ -513,13 +514,16 @@ def main():
                         player.pick_item(nearby)  # מוסיף ל־Inventory
                         loot_items.remove(nearby)
                         outgoing_messages.put(f"PICKUP|{nearby.x},{nearby.y}|{nearby.name}")
+
                 if event.key == pygame.K_q:
-                    gun_slot = player.drop_selected_weapon()
-                    if gun_slot:
-                        gun_slot.x=player.x
-                        gun_slot.y=player.y
-                        loot_items.append(gun_slot)
-                        print(f"Dropped {gun_slot.name}")
+                    slot_to_drop = player.selected_slot + 1
+                    gun = player.drop_selected_weapon()
+                    if gun:
+                        dropped = Item(player.x, player.y,gun.image,"weapon", gun.name)
+                        loot_items.append(dropped)
+                        print("i want to drop")
+                        outgoing_messages.put(f"DROP|{player.x},{player.y}|{player.selected_slot+1}")
+                        print(f"Dropped {gun.name}")
 
                 elif event.key == pygame.K_1:
                     if len(player.inventory) >= 1:
@@ -614,8 +618,6 @@ def main():
             elif parts[0] == "SETID":
                 if MY_ID == "":
                     MY_ID = parts[1]
-
-
 
         # --- CAMERA FOLLOWS PLAYER ---
         camera_x = player.x - screen.get_width() // 2
