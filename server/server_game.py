@@ -13,14 +13,14 @@ INVENTORY_SIZE = 5
 MAX_BULLETS = 1000
 TILE_SIZE = 64
 TOLERANCE = 70
-BULLETS_MOVE_TIME = 0.01
+BULLETS_MOVE_TIME = 0.005
 MONSTERS_AMOUNT = 100
 SCREEN_WIDTH = 1920
 SCREEN_HEIGHT = 1080
 MAX_WEAPONS = 10000
 AMOUNT_TO_DROP_IN_DEATH = 2
 ENTITIES_SPEED = 4
-WEAPON_LIST = [["gun", 20, TILE_SIZE * 10]]  #-> name,damage,range
+WEAPON_LIST = [["gun", 20, TILE_SIZE * 8],["rifle" ,10 , TILE_SIZE * 12]]  #-> name,damage,range
 WEAPON_NAMES = [w[0] for w in WEAPON_LIST]
 WEAPON_DAMAGE = [w[1] for w in WEAPON_LIST]
 WEAPON_RANGE = [w[2] for w in WEAPON_LIST]
@@ -329,8 +329,16 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             client._quic.send_stream_data(client.stream_id, msg, end_stream=False)
             client.transmit()
 
-    def broadcast_show_bullet(self, pos: str):
-        msg = f"SHOWBULLET|{pos}\n".encode()
+    def broadcast_show_bullet(self, pos: str ,angle: str, bullet_id: str):
+        msg = f"SHOW-BULLET|{pos}|{angle}|{bullet_id}\n".encode()
+        for client in list(state.active_clients):
+            if client.stream_id is None:
+                continue
+            client._quic.send_stream_data(client.stream_id, msg, end_stream=False)
+            client.transmit()
+
+    def broadcast_del_bullet(self, id: str):
+        msg = f"DEL-BULLET|{id}\n".encode()
         for client in list(state.active_clients):
             if client.stream_id is None:
                 continue
@@ -387,7 +395,8 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             if WEAPON_NAMES[i] == gun_type:
                 gun_damage = int(WEAPON_DAMAGE[i])
                 gun_range = int(WEAPON_RANGE[i])
-
+        pos = f"{x},{y}"
+        self.broadcast_show_bullet(pos , angle , str(bullet_id))
         for _ in range(gun_range):
             x, y = get_next_bullet_position(x, y, angle)
             state.active_bullets[bullet_id]["x"] = x
@@ -396,12 +405,14 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             pos = f"{x},{y}"
             if not check_if_in_map(x, y):  #checks if the bullet got out of the map
                 del state.active_bullets[bullet_id]
+                self.broadcast_del_bullet(str(bullet_id))
                 return
             if state.game_map[int(y / TILE_SIZE)][int(x / TILE_SIZE)] == "#":  #checks if the bullet got into wall
                 del state.active_bullets[bullet_id]
+                self.broadcast_del_bullet(str(bullet_id))
                 return
 
-            self.broadcast_show_bullet(pos)
+
 
             for player_id, pos_str in list(state.players_pos.items()):
                 try:
@@ -412,6 +423,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 if abs(px - x) <= TOLERANCE and abs(py - y) <= TOLERANCE:
                     if player_id != self._quic.host_cid.hex():
                         del state.active_bullets[bullet_id]
+                        self.broadcast_del_bullet(str(bullet_id))
                         self.damage(player_id, gun_damage)
                         return
 
@@ -419,6 +431,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
         if bullet_id in state.active_bullets:
             del state.active_bullets[bullet_id]
+            self.broadcast_del_bullet(str(bullet_id))
 
     def damage(self, client_id: str, damage: int):
         hp = int(state.players_hp.get(client_id))
@@ -491,8 +504,8 @@ def find_nearest_player(monster_x, monster_y):
     min_x = 10000000
     min_y = 10000000
     for other_id, pos in state.players_pos.items():
-        player_x = pos.split(",")[0]
-        player_y = pos.split(",")[1]
+        player_x = float(pos.split(",")[0])
+        player_y = float(pos.split(",")[1])
         if (player_x*player_x + player_y*player_y) < (min_x*min_x + min_y*min_y):
             min_x = player_x
             min_y = player_y
@@ -658,12 +671,18 @@ def spawn_loot_per_camera_zone(game_map, per_zone=2):
 def monsters_manager():
     while True:
         for i in range(MONSTERS_AMOUNT):
+
             monster_x = state.monsters[i+1]["x"]
             monster_y = state.monsters[i+1]["y"]
+
             player_x, player_y = find_nearest_player(monster_x, monster_y)
+
             monster_pos = monster_x + "," + monster_y
             player_pos = str(player_x) + "," + str(player_y)
+
             node = A_star_algorythm(monster_pos , player_pos)
+
+
 # ---------- Server entry ---------- #
 
 async def check_cpu():

@@ -432,6 +432,29 @@ def draw_fps(screen, clock, font):
 
     # ציור הטקסט עצמו
     screen.blit(fps_surface, (10 + padding, 10 + padding // 2))
+
+
+def draw_bullet(screen, bullet_img, x, y, angle, camera_x, camera_y):
+    """
+    מציירת קליע בודד מסובב לפי הזווית שלו.
+    """
+    # 1. סיבוב התמונה לפי הזווית (Pygame מסובב נגד כיוון השעון, לכן נשים מינוס)
+    # אנחנו משתמשים ב-rotozoom לאיכות טובה יותר או ב-rotate הפשוט
+    rotated_bullet = pygame.transform.rotate(bullet_img, -angle)
+
+    # 2. חישוב המיקום על המסך (הפחתת המצלמה)
+    draw_x = x - camera_x
+    draw_y = y - camera_y
+
+    # 3. מירכוז התמונה המסובבת כדי שלא "תקפוץ" בזמן סיבוב
+    rect = rotated_bullet.get_rect(center=(draw_x, draw_y))
+
+    # 4. הציור בפועל
+    screen.blit(rotated_bullet, rect)
+
+def get_next_bullet_position(x, y, angle_degrees):
+    angle_rad = math.radians(angle_degrees)
+    return x + math.cos(angle_rad), y + math.sin(angle_rad)
 # ---------------- MAIN GAME LOOP ---------------- #
 
 def main():
@@ -480,7 +503,7 @@ def main():
     loot_items = []
     # print("Loot spawned:", len(loot_items))
     # print("First loot at:", loot_items[0].x, loot_items[0].y)
-    bullets = []
+    bullets = {} #bullet id -> {x,y,angle}
 
     running = True
     while running:
@@ -610,8 +633,20 @@ def main():
                     if player_id == MY_ID:
                         pygame.quit();exit()
 
-            elif parts[0] == "SHOWBULLET":
-                bullets.append({"pos": parts[1], "time": time.time()})
+            elif parts[0] == "SHOW-BULLET":
+                if len(parts) < 4:
+                    continue
+                bullet_x = parts[1].split(',')[0]
+                bullet_y = parts[1].split(',')[1]
+                bullets[parts[3]] = {"x": bullet_x, "y": bullet_y ,"angle": parts[2]}
+
+            elif parts[0] == "DEL-BULLET":
+                if len(parts) < 2:
+                    continue
+                try:
+                    del bullets[parts[1]]
+                except:
+                    pass
 
             elif parts[0] == "DROPPED":
                 if len(parts) < 3:
@@ -669,26 +704,31 @@ def main():
         for rp in remote_players.values():
             rp.draw(screen, camera_x, camera_y)
 
-        current_time = time.time()
-        alive_bullets = []  # רשימה שתשמור רק קליעים שעוד לא נעלמו
 
-        for b in bullets:
-            # בודקים אם עברו פחות מ-0.2 שניות
-            if current_time - b["time"] < 0.01:
-                alive_bullets.append(b)  # שומרים את הקליע
-                try:
-                    bx, by = map(float, b["pos"].split(","))
-                    screen.blit(bullet_img, (bx - camera_x, by - camera_y))
-                except Exception as e:
-                    pass
+        # calculate the bullets movements and show them
+        for i in bullets:
+            bullet_x = float(bullets[i]["x"])
+            bullet_y = float(bullets[i]["y"])
+            bullet_angle = float(bullets[i]["angle"])
 
-        # מעדכנים את הרשימה הראשית שתכיל רק את הקליעים ששרדו
-        bullets = alive_bullets
+            draw_bullet(screen, bullet_img, bullet_x, bullet_y, bullet_angle, camera_x, camera_y)
+
+            new_x, new_y = get_next_bullet_position(bullet_x, bullet_y, bullet_angle)
+            bullets[i]["x"] = new_x
+            bullets[i]["y"] = new_y
+
+            #if on player/outside the map/on water:
+            #del bullets[i]
+
 
         draw_fps(screen, clock, chat_font)
         draw_inventory(screen, player)
         draw_chat(screen, chat_font, chat_messages, chat_open, chat_input)
         pygame.display.flip()
+
+
+
+
         clock.tick(60)
 
     pygame.quit()
