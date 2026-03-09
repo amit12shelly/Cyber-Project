@@ -37,7 +37,7 @@ async def quic_network_loop():
 
     async with connect(SERVER_IP, SERVER_PORT, configuration=config) as client:
         stream_reader, stream_writer = await client.create_stream()
-
+        print("Connected to server!")
         async def read_from_server():
             buffer = ""
             while True:
@@ -124,35 +124,35 @@ def collides_with_wall(game_map, x, y, size, tile_size):
 
     return False
 
-def spawn_loot_per_camera_zone(game_map, tile_size, loot_pool, screen_width, screen_height, per_zone=2):
-    """
-    Spawn loot so that each camera-sized zone has at least `per_zone` items.
-    """
-    loot_list = []
-
-    tiles_wide = len(game_map[0])
-    tiles_high = len(game_map)
-
-    zone_tiles_x = screen_width // tile_size
-    zone_tiles_y = screen_height // tile_size
-
-    for win_y in range(0, tiles_high, zone_tiles_y):
-        for win_x in range(0, tiles_wide, zone_tiles_x):
-            spawned = 0
-            attempts = 0
-            while spawned < per_zone and attempts < 50:
-                attempts += 1
-                tile_x = random.randint(win_x, min(win_x + zone_tiles_x - 1, tiles_wide - 1))
-                tile_y = random.randint(win_y, min(win_y + zone_tiles_y - 1, tiles_high - 1))
-
-                if game_map[tile_y][tile_x] != "#":  # רק על רצפה
-                    x = tile_x * tile_size
-                    y = tile_y * tile_size
-                    item_type, name, image = random.choice(loot_pool)
-                    loot_list.append(Item(x, y, image, item_type, name))
-                    spawned += 1
-
-    return loot_list
+# def spawn_loot_per_camera_zone(game_map, tile_size, loot_pool, screen_width, screen_height, per_zone=2):
+#     """
+#     Spawn loot so that each camera-sized zone has at least `per_zone` items.
+#     """
+#     loot_list = []
+#
+#     tiles_wide = len(game_map[0])
+#     tiles_high = len(game_map)
+#
+#     zone_tiles_x = screen_width // tile_size
+#     zone_tiles_y = screen_height // tile_size
+#
+#     for win_y in range(0, tiles_high, zone_tiles_y):
+#         for win_x in range(0, tiles_wide, zone_tiles_x):
+#             spawned = 0
+#             attempts = 0
+#             while spawned < per_zone and attempts < 50:
+#                 attempts += 1
+#                 tile_x = random.randint(win_x, min(win_x + zone_tiles_x - 1, tiles_wide - 1))
+#                 tile_y = random.randint(win_y, min(win_y + zone_tiles_y - 1, tiles_high - 1))
+#
+#                 if game_map[tile_y][tile_x] != "#":  # רק על רצפה
+#                     x = tile_x * tile_size
+#                     y = tile_y * tile_size
+#                     item_type, name, image = random.choice(loot_pool)
+#                     loot_list.append(Item(x, y, image, item_type, name))
+#                     spawned += 1
+#
+#     return loot_list
 
 def draw_inventory(screen, player):
     slot_size = 64
@@ -200,7 +200,43 @@ class Item:
             self.rect.topleft = (self.x, self.y)
 
     def draw(self, screen, camera_x, camera_y):
-        screen.blit(self.image, (self.x - camera_x, self.y - camera_y))
+        draw_x = self.x - camera_x
+        draw_y = self.y - camera_y
+
+        # צייר רק אם החפץ נמצא בתוך הגבולות של המסך הנוכחי!
+        if -self.size <= draw_x <= screen.get_width() and -self.size <= draw_y <= screen.get_height():
+            screen.blit(self.image, (draw_x, draw_y))
+
+# ---------------- Item CLASS ---------------- #
+class Monster:
+    def __init__(self, x, y, hp, image):
+        self.x = x
+        self.y = y
+        self.hp = hp
+        self.image = image
+        self.size = 64
+        self.rect = pygame.Rect(x, y, self.size, self.size)
+
+    def update(self):
+        self.rect.topleft = (self.x, self.y)
+
+    def draw(self, screen, camera_x, camera_y):
+        draw_x = self.rect.x - camera_x
+        draw_y = self.rect.y - camera_y
+
+        screen.blit(self.image, (draw_x, draw_y))
+
+        if -self.size <= draw_x <= screen.get_width() and -self.size <= draw_y <= screen.get_height():
+            bar_width = 100
+            bar_height = 5
+            bar_x = draw_x + (self.size // 2) - (bar_width // 2)
+            bar_y = draw_y - 10
+
+            pygame.draw.rect(screen, (255, 0, 0), (bar_x, bar_y, bar_width, bar_height))
+
+            if self.hp > 0:
+                current_hp_width = min(self.hp, bar_width)
+                pygame.draw.rect(screen, (0, 255, 0), (bar_x, bar_y, current_hp_width, bar_height))
 
 # ---------------- PLAYER CLASS ---------------- #
 class Player:
@@ -403,35 +439,41 @@ def draw_chat(screen, chat_font, chat_messages, chat_open, chat_input):
         screen.blit(chat_font.render(chat_input + cursor, True, CHAT_TEXT_COLOR), (CHAT_X + CHAT_PADDING, input_y + CHAT_PADDING))
 
 
-def draw_fps(screen, clock, font):
-    """
-    מציירת מדד FPS מעוצב בפינה העליונה.
-    """
-    # שליפת ה-FPS הנוכחי מהשעון של Pygame
-    fps_val = int(clock.get_fps())
-    fps_text = f"FPS: {fps_val}"
+def draw_fps(screen, clock, font, server_fps):
+    client_fps_val = int(clock.get_fps())
+    client_color = (0, 255, 0) if client_fps_val > 30 else (255, 50, 50)
+    client_surface = font.render(f"Client FPS: {client_fps_val}", True, client_color)
 
-    # יצירת המשטח של הטקסט
-    # צבע ירוק אם ה-FPS גבוה, אדום אם הוא נמוך מ-30
-    color = (0, 255, 0) if fps_val > 30 else (255, 50, 50)
-    fps_surface = font.render(fps_text, True, color)
 
-    # הגדרת מיקום וגודל הרקע (Rect)
+    try:
+        server_fps_val = int(server_fps)
+        server_color = (0, 255, 0) if server_fps_val > 30 else (255, 50, 50)
+        server_text = f"Server TPS: {server_fps_val}"
+    except (ValueError, TypeError):
+
+        server_text = "Server TPS: ?"
+        server_color = (255, 255, 255)
+
+    server_surface = font.render(server_text, True, server_color)
+
+
     padding = 10
-    rect_width = fps_surface.get_width() + (padding * 2)
-    rect_height = fps_surface.get_height() + (padding)
+
+    max_text_width = max(client_surface.get_width(), server_surface.get_width())
+    rect_width = max_text_width + (padding * 2)
+
+    rect_height = client_surface.get_height() + server_surface.get_height() + (padding * 2)
+
     fps_rect = pygame.Rect(10, 10, rect_width, rect_height)
 
-    # ציור רקע שחור חצי שקוף
     bg_surface = pygame.Surface((rect_width, rect_height), pygame.SRCALPHA)
     bg_surface.fill((0, 0, 0, 150))  # 150 זה רמת השקיפות
     screen.blit(bg_surface, (10, 10))
 
-    # ציור מסגרת דקה סביב המדד
     pygame.draw.rect(screen, (100, 100, 100), fps_rect, 1)
 
-    # ציור הטקסט עצמו
-    screen.blit(fps_surface, (10 + padding, 10 + padding // 2))
+    screen.blit(client_surface, (10 + padding, 10 + padding // 2))
+    screen.blit(server_surface, (10 + padding, 10 + padding + client_surface.get_height()))
 
 
 def draw_bullet(screen, bullet_img, x, y, angle, camera_x, camera_y):
@@ -454,7 +496,7 @@ def draw_bullet(screen, bullet_img, x, y, angle, camera_x, camera_y):
 
 def get_next_bullet_position(x, y, angle_degrees):
     angle_rad = math.radians(angle_degrees)
-    return x + math.cos(angle_rad), y + math.sin(angle_rad)
+    return x + math.cos(angle_rad)*15, y + math.sin(angle_rad)*15
 # ---------------- MAIN GAME LOOP ---------------- #
 
 def main():
@@ -486,24 +528,23 @@ def main():
     outgoing_messages.put(f"UPDATE|{player.x},{player.y}")
 
     # --- LOAD LOOT IMAGES ---
-    gun1_img = pygame.transform.scale(
-        pygame.image.load("img/rightWeapon1.png").convert_alpha(), (64, 64)
-    )
-    gun2_img = pygame.transform.scale(
-        pygame.image.load("img/rightWeapon2.png").convert_alpha(), (64, 64)
-    )
+    weapon_images = {
+        "rifle": pygame.transform.scale(pygame.image.load("img/leftWeapon1.png").convert_alpha(), (64, 64)),
+        "gun": pygame.transform.scale(pygame.image.load("img/rightWeapon1.png").convert_alpha(), (64, 64)),
+        "rpg": pygame.transform.scale(pygame.image.load("img/rpg_right.png").convert_alpha(), (64, 64))
+    }
+    monster_img = pygame.transform.scale(pygame.image.load("img/monster_down.png").convert_alpha(), (64, 64))
+
     remote_players = {}
     # Loot pool (מאגר פריטים)
-    loot_pool = [
-        ("weapon", "gun", gun1_img),
-        ("weapon", "shotGun", gun2_img),
-    ]
 
     # loot_items = spawn_loot_per_camera_zone(game_map, tile_size, loot_pool, screen.get_width(), screen.get_height(),per_zone=1)
     loot_items = []
+    monsters=[]
     # print("Loot spawned:", len(loot_items))
     # print("First loot at:", loot_items[0].x, loot_items[0].y)
     bullets = {} #bullet id -> {x,y,angle}
+    server_fps = 0
 
     running = True
     while running:
@@ -615,11 +656,14 @@ def main():
                 x, y = map(float, parts[2].split(","))
                 hp = int(parts[3])
 
-                if player_id not in remote_players:
-                    remote_players[player_id] = RemotePlayer(x, y, hp, player.base_sprites)
-                    outgoing_messages.put(f"UPDATE|{player.x},{player.y}")
+                if player_id == MY_ID:
+                    player.hp = hp
                 else:
-                    remote_players[player_id].update_from_server(x, y, hp)
+                    if player_id not in remote_players:
+                        remote_players[player_id] = RemotePlayer(x, y, hp, player.base_sprites)
+                        outgoing_messages.put(f"UPDATE|{player.x},{player.y}")
+                    else:
+                        remote_players[player_id].update_from_server(x, y, hp)
 
             elif parts[0] == "REMOVE":
                 if len(parts) < 2:
@@ -648,22 +692,28 @@ def main():
                 except:
                     pass
 
+
             elif parts[0] == "DROPPED":
+
                 if len(parts) < 3:
                     continue
+
                 x_dropped, y_dropped = parts[1].split(",")
                 x_dropped = float(x_dropped)
                 y_dropped = float(y_dropped)
                 type_dropped = parts[2]
-                if type_dropped == "rifle":
-                    img = pygame.image.load("img/leftWeapon1.png")
-                    img = pygame.transform.scale(img, (64, 64))
-                elif type_dropped == "gun":
-                    img = pygame.image.load("img/rightWeapon1.png")
-                    img = pygame.transform.scale(img, (64, 64))
+
+
+                if type_dropped in weapon_images:
+
+                    img = weapon_images[type_dropped]
+
+                    loot_items.append(Item(x_dropped, y_dropped, img, "weapon", type_dropped))
+
                 else:
-                    continue
-                loot_items.append(Item(x_dropped,y_dropped,img,"weapon",type_dropped))
+
+                    print(f"Warning: Unknown weapon type dropped: {type_dropped}")
+
             elif parts[0] == "UNDROPPED":
                 if len(parts) < 3:
                     continue
@@ -689,6 +739,19 @@ def main():
                 if MY_ID == "":
                     MY_ID = parts[1]
 
+            elif parts[0] == "FPS":
+                server_fps = parts[1]
+            elif parts[0] == "MONSTERS":
+                monsters.clear()
+                for monster_data in parts[1:]:
+                    x_monster, y_monster,hp_monster= monster_data.split(",")
+                    x_monster = float(x_monster)
+                    y_monster = float(y_monster)
+                    hp_monster = int(hp_monster)
+
+                    monsters.append(Monster(x_monster, y_monster, hp_monster,monster_img))
+
+
         # --- CAMERA FOLLOWS PLAYER ---
         camera_x = player.x - screen.get_width() // 2
         camera_y = player.y - screen.get_height() // 2
@@ -703,6 +766,9 @@ def main():
         player.draw(screen, camera_x, camera_y)
         for rp in remote_players.values():
             rp.draw(screen, camera_x, camera_y)
+        for monster in monsters:
+            monster.update()
+            monster.draw(screen, camera_x, camera_y)
 
 
         # calculate the bullets movements and show them
@@ -721,7 +787,7 @@ def main():
             #del bullets[i]
 
 
-        draw_fps(screen, clock, chat_font)
+        draw_fps(screen, clock, chat_font, server_fps)
         draw_inventory(screen, player)
         draw_chat(screen, chat_font, chat_messages, chat_open, chat_input)
         pygame.display.flip()

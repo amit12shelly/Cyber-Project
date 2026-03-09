@@ -27,9 +27,11 @@ WEAPON_NAMES = [w[0] for w in WEAPON_LIST]
 WEAPON_DAMAGE = [w[1] for w in WEAPON_LIST]
 WEAPON_RANGE = [w[2] for w in WEAPON_LIST]
 MONSTER_CHANGE_PATH_EVERY_SET_SECONDS = 3
+MONSTER_ACCURACY = 65  # 1-100
 
 counter = count()
 monsters_list = []
+SERVER_FPS = 0
 
 def load_map():
     with open("map.txt", "r") as f:
@@ -882,11 +884,19 @@ async def monsters_manager():
             # --- הגיון הלחימה של המפלצת ---
             # אם השחקן בטווח הנשק של המפלצת
             if dist_to_player <= monster.weapon[2]:
-                # יורה רק אם עברו 2 שניות מהירייה הקודמת
-                if now - monster.last_shot_time >= 2.0:
-                    # מחשבים את הזווית אל השחקן
+
+                # המפלצת יורה רק כל 3.5 עד 5.5 שניות (זמן אקראי)
+                if now - monster.last_shot_time >= random.uniform(3.5, 5.5):
+
+                    # מחשבים את הזווית המדויקת אל השחקן
                     angle = math.degrees(
                         math.atan2(monster.nearest_player[1] - monster.y, monster.nearest_player[0] - monster.x))
+
+                    # --- יישום הדיוק לפי המשתנה הגלובלי ---
+                    # מחשבים את זווית הסטייה המקסימלית:
+                    # אם הדיוק הוא 100, הסטייה היא 0. אם הדיוק 65, הסטייה היא 14 מעלות.
+                    max_deviation = (100 - MONSTER_ACCURACY) * 0.4
+                    angle += random.uniform(-max_deviation, max_deviation)
 
                     new_id = random.randint(1, MAX_BULLETS)
                     while new_id in state.active_bullets:
@@ -898,7 +908,7 @@ async def monsters_manager():
                         "angle": angle,
                     }
 
-                    # קוראים לפונקציה שיצרנו כדי להזיז את הכדור
+                    # משגרים את הכדור
                     asyncio.create_task(monster_gun_tracking(new_id, monster.weapon[0], monster.x, monster.y, angle))
                     monster.last_shot_time = now
 
@@ -961,6 +971,37 @@ async def check_cpu():
         await asyncio.sleep(20)
 
 
+async def track_server_fps():
+    global SERVER_FPS
+    fps_counter = 0
+    loop_counter = 0
+    last_time = time.time()
+
+    while True:
+        while loop_counter < 30:
+            fps_counter += 1
+            loop_counter += 1
+            now = time.time()
+
+            if now - last_time >= 1.0:
+                SERVER_FPS = fps_counter
+
+                print(f"[Server Health] FPS/TPS: {SERVER_FPS} / 60")
+                fps_counter = 0
+                last_time = now
+
+            await asyncio.sleep(1 / 60)
+        loop_counter = 0
+        broadcast_fps()
+
+def broadcast_fps():
+    msg = f"FPS|{SERVER_FPS}\n".encode()
+    for client in list(state.active_clients):
+        if client.stream_id is None:
+            continue
+        client._quic.send_stream_data(client.stream_id, msg, end_stream=False)
+        client.transmit()
+
 async def main():
     config = QuicConfiguration(
         is_client=False,
@@ -980,6 +1021,7 @@ async def main():
 
     asyncio.create_task(check_cpu())
     asyncio.create_task(monsters_manager())
+    asyncio.create_task(track_server_fps())
     await asyncio.Future()
 
 
