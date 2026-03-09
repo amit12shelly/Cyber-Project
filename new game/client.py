@@ -200,7 +200,12 @@ class Item:
             self.rect.topleft = (self.x, self.y)
 
     def draw(self, screen, camera_x, camera_y):
-        screen.blit(self.image, (self.x - camera_x, self.y - camera_y))
+        draw_x = self.x - camera_x
+        draw_y = self.y - camera_y
+
+        # צייר רק אם החפץ נמצא בתוך הגבולות של המסך הנוכחי!
+        if -self.size <= draw_x <= screen.get_width() and -self.size <= draw_y <= screen.get_height():
+            screen.blit(self.image, (draw_x, draw_y))
 
 # ---------------- Item CLASS ---------------- #
 class Monster:
