@@ -503,12 +503,13 @@ def main():
     outgoing_messages.put(f"UPDATE|{player.x},{player.y}")
 
     # --- LOAD LOOT IMAGES ---
-    # --- LOAD LOOT IMAGES ---
     weapon_images = {
         "rifle": pygame.transform.scale(pygame.image.load("img/leftWeapon1.png").convert_alpha(), (64, 64)),
         "gun": pygame.transform.scale(pygame.image.load("img/rightWeapon1.png").convert_alpha(), (64, 64)),
         "rpg": pygame.transform.scale(pygame.image.load("img/rpg_right.png").convert_alpha(), (64, 64))
     }
+    monster_img = pygame.transform.scale(pygame.image.load("img/monster_down.png").convert_alpha(), (64, 64))
+
     remote_players = {}
     # Loot pool (מאגר פריטים)
 
@@ -672,16 +673,10 @@ def main():
                     continue
 
                 x_dropped, y_dropped = parts[1].split(",")
-
                 x_dropped = float(x_dropped)
-
                 y_dropped = float(y_dropped)
-
                 type_dropped = parts[2]
 
-                print(type_dropped)
-
-                # שולף את התמונה מהמילון שטעינו מראש במקום לקרוא מהדיסק
 
                 if type_dropped in weapon_images:
 
@@ -692,6 +687,7 @@ def main():
                 else:
 
                     print(f"Warning: Unknown weapon type dropped: {type_dropped}")
+
             elif parts[0] == "UNDROPPED":
                 if len(parts) < 3:
                     continue
@@ -724,9 +720,7 @@ def main():
                     y_monster = float(y_monster)
                     hp_monster = int(hp_monster)
 
-                    img = pygame.image.load("img/monster_down.png")
-                    img = pygame.transform.scale(img, (64, 64))
-                    monsters.append(Monster(x_monster, y_monster, hp_monster,img))
+                    monsters.append(Monster(x_monster, y_monster, hp_monster,monster_img))
 
 
         # --- CAMERA FOLLOWS PLAYER ---
