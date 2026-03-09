@@ -766,7 +766,6 @@ async def monsters_manager():
 
     while True:
         now = time.time()
-        monster_message = ""
 
         for monster in monsters_list:
             if monster is None:
@@ -793,18 +792,41 @@ async def monsters_manager():
                 monster.y = monster.path.data[1]
                 monster.path = monster.path.next
 
-            monster_message += f"|{monster.x},{monster.y},{monster.hp}"
 
-        if monster_message:
-            broadcast_monster(monster_message)
+        broadcast_visible_monsters()
 
         await asyncio.sleep(0.5)
 
-def broadcast_monster(monsters_message: str):
-    msg = f"MONSTERS{monsters_message}\n".encode()
+
+def broadcast_visible_monsters():
+    half_width = (SCREEN_WIDTH / 2) + TILE_SIZE
+    half_height = (SCREEN_HEIGHT / 2) + TILE_SIZE
+
     for client in list(state.active_clients):
         if client.stream_id is None:
             continue
+
+        client_id = client._quic.host_cid.hex()
+        if client_id not in state.players_pos:
+            continue
+
+        try:
+            px, py = map(float, state.players_pos[client_id].split(","))
+        except:
+            continue
+
+        client_monster_msg = ""
+        for monster in monsters_list:
+            if monster is None:
+                continue
+
+            # בודקים אם המפלצת נמצאת בתוך טווח המצלמה של השחקן הזה
+            if abs(monster.x - px) <= half_width and abs(monster.y - py) <= half_height:
+                client_monster_msg += f"|{monster.x},{monster.y},{monster.hp}"
+
+        # שולחים רק למחשב הספציפי הזה.
+        # (אם אין מפלצות סביבו, הוא יקבל "MONSTERS" נקי, מה שיאמר לקליינט למחוק מפלצות מהמסך)
+        msg = f"MONSTERS{client_monster_msg}\n".encode()
         client._quic.send_stream_data(client.stream_id, msg, end_stream=False)
         client.transmit()
 # ---------- Server entry ---------- #
