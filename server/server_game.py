@@ -613,40 +613,41 @@ def A_star_algorythm(start, target, desired_range):
     heapq.heappush(open_heap, (start_node.data[4], next(counter), start_node))
 
     while open_heap:
+        open_nodes = []
+        closed_nodes = []
+        start_H_cost = pitagoras((target[0] - start[0]), (target[1] - start[1]))
+        open_nodes.append(Node((start[0], start[1], 0, start_H_cost, start_H_cost)))
 
-        _, _, current_node = heapq.heappop(open_heap)
+        while open_nodes:
+            current_node = open_nodes[0]
+            for node in open_nodes:
+                if node.data[4] < current_node.data[4]:
+                    current_node = node
+            open_nodes.remove(current_node)
+            closed_nodes.append(current_node)
 
-        cx, cy = current_node.data[0], current_node.data[1]
+            if current_node.data[3] < TILE_SIZE:
+                return current_node
 
-        if (cx, cy) in closed_set:
-            continue
+            neighbors = find_neighbors(current_node, target)
+            for neighbor in neighbors:
+                # add if node is in wall skip neighbor (continue)
 
-        closed_set.add((cx, cy))
-
-        if current_node.data[3] < TILE_SIZE * (desired_range - 1):
-            path = reverse_node_chain(current_node).next
-            return path if path else current_node   # ensures not None
-
-        neighbors = find_neighbors(current_node, target)
-
-        for neighbor in neighbors:
-
-            nx, ny = neighbor.data[0], neighbor.data[1]
-
-            row = int(ny / TILE_SIZE)
-            col = int(nx / TILE_SIZE)
-
-            if 0 <= row < len(state.game_map) and 0 <= col < len(state.game_map[0]):
-                if state.game_map[row][col] == ".":
+                val1, val2 = neighbor.data[:2]
+                if any(in_closed.data[0] == val1 and in_closed.data[1] == val2 for in_closed in closed_nodes):
                     continue
 
-            if (nx, ny) in closed_set:
-                continue
-
-            heapq.heappush(open_heap, (neighbor.data[4], next(counter), neighbor))
-
-    # 🔧 IMPORTANT: fallback if no path found
-    return None
+                found = False
+                for open_neighbor in open_nodes:
+                    if open_neighbor.data[0] == neighbor.data[0] and open_neighbor.data[1] == neighbor.data[1]:
+                        found = True
+                        if open_neighbor.data[4] > neighbor.data[4]:
+                            open_neighbor.data = neighbor.data
+                            open_neighbor.next = current_node
+                        break
+                if not found:
+                    neighbor.next = current_node
+                    open_nodes.append(neighbor)
 
 def get_next_bullet_position(x, y, angle_degrees):
     angle_rad = math.radians(angle_degrees)
