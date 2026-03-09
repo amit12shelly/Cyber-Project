@@ -253,7 +253,14 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             if drop in WEAPON_NAMES:
 
                 if drop != "none":  # if he has something to drop
-                    state.players_inventory[self._quic.host_cid.hex()][weapon_slot] = "none"  # removing the weapon from the player inventory
+                    client_hex = self._quic.host_cid.hex()
+
+                    # 1. במקום סתם לרוקן את הסלוט, מזיזים את כל הנשקים שאחריו מקום אחד שמאלה (כדי לסנכרן עם ה-pop בקליינט)
+                    for i in range(weapon_slot, INVENTORY_SIZE - 1):
+                        state.players_inventory[client_hex][i] = state.players_inventory[client_hex][i + 1]
+
+                    # 2. מרוקנים את הסלוט האחרון לגמרי
+                    state.players_inventory[client_hex][INVENTORY_SIZE - 1] = "none"
 
                     new_id = random.randint(1, 1000000)
                     while new_id in state.map_weapons:
