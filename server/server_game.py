@@ -526,17 +526,26 @@ class Monster:
 
     def take_damage(self, damage):
         self.hp -= damage
+        print("1")
         if self.hp <= 0:
             tiles_high = len(state.game_map)
             tiles_wide = len(state.game_map[0])
             tile_x = random.randint(0, tiles_wide - 1)
             tile_y = random.randint(0, tiles_high - 1)
+            print("2")
+            pixel_x = float(tile_x * TILE_SIZE)
+            pixel_y = float(tile_y * TILE_SIZE)
+            self.x = pixel_x
+            self.y = pixel_y
+            print("3")
             while state.game_map[tile_y][tile_x] != ".":
                 pixel_x = float(tile_x * TILE_SIZE)
                 pixel_y = float(tile_y * TILE_SIZE)
                 self.x = pixel_x
                 self.y = pixel_y
+                print("4")
 
+            print("5")
             self.hp = 100
             self.weapon = random.choice(WEAPON_LIST)
             self.nearest_player = find_nearest_player(self.x, self.y)
