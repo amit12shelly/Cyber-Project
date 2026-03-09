@@ -3,7 +3,9 @@ import math
 import random
 import psutil
 import heapq
+import time
 
+from itertools import count
 from aioquic.asyncio import QuicConnectionProtocol, serve
 from aioquic.quic.configuration import QuicConfiguration
 from aioquic.quic.events import StreamDataReceived, QuicEvent, ConnectionTerminated
@@ -14,17 +16,20 @@ MAX_BULLETS = 1000
 TILE_SIZE = 64
 TOLERANCE = 70
 BULLETS_MOVE_TIME = 0.01
-MONSTERS_AMOUNT = 100
+MONSTERS_AMOUNT = 10000
 SCREEN_WIDTH = 1920
 SCREEN_HEIGHT = 1080
 MAX_WEAPONS = 9000
 AMOUNT_TO_DROP_IN_DEATH = 2
 ENTITIES_SPEED = 4
-WEAPON_LIST = [["gun", 20, TILE_SIZE * 8],["rifle" ,10 , TILE_SIZE * 12],["rpg",30,TILE_SIZE*25]] #-> name,damage,range
+WEAPON_LIST = [["gun", 20, TILE_SIZE * 10],["rifle" ,10 , TILE_SIZE * 20],["rpg",30,TILE_SIZE*25]] #-> name,damage,range
 WEAPON_NAMES = [w[0] for w in WEAPON_LIST]
 WEAPON_DAMAGE = [w[1] for w in WEAPON_LIST]
 WEAPON_RANGE = [w[2] for w in WEAPON_LIST]
+MONSTER_CHANGE_PATH_EVERY_SET_SECONDS = 3
 
+counter = count()
+monsters_list = []
 
 def load_map():
     with open("map.txt", "r") as f:
@@ -45,7 +50,7 @@ class GameState:
     game_map = load_map()
 
     #monsters info
-    monsters = {}  #monster_id -> {x, y, hp}
+    monsters = {}  #monster_id -> {x, y, hp, path(A*), last_path_time(last time called A* for this monster)}
 
 
 state = GameState()
@@ -495,8 +500,31 @@ class Node:
     self.data = data
     self.next = None
 
+class Monster:
+    def __init__(self, x, y, hp):
+        self.hp = hp
+        self.weapon = random.choice(WEAPON_LIST)
+        self.x = x
+        self.y = y
+        self.nearest_player = find_nearest_player(self.x, self.y)
+        self.path = A_star_algorythm((self.x, self.y), self.nearest_player, self.weapon[2])
+        self.last_path_time = time.time()
+
+
 def pitagoras(x,y):
     return math.sqrt((x*x)+(y*y))
+
+def reverse_node_chain(node):
+    prev = None
+    current = node
+
+    while current:
+        nxt = current.next
+        current.next = prev
+        prev = current
+        current = nxt
+
+    return prev
 
 def check_if_in_map(x, y):
     x = int(float(x)/ TILE_SIZE)
@@ -524,48 +552,55 @@ def find_nearest_player(monster_x, monster_y):
             min_y = player_y
     return min_x, min_y
 
+def check_if_in_map_for_monster(x, y):
+    """Return True if monster's position is inside map bounds."""
+    x_tile = int(x / TILE_SIZE)
+    y_tile = int(y / TILE_SIZE)
+    return 0 <= y_tile < len(state.game_map) and 0 <= x_tile < len(state.game_map[0])
+
 def find_neighbors(current_node, target):
-    neighbor_nodes = []
-
+    """Generate valid neighboring nodes for A* pathfinding, skipping walls."""
     cx, cy, g = current_node.data[0], current_node.data[1], current_node.data[2]
+    neighbors = []
 
-    for i in range(3):
-        for j in range(3):
-            dx = (j-1) * ENTITIES_SPEED
-            dy = (i-1) * ENTITIES_SPEED
-
+    for dx in [-TILE_SIZE, 0, TILE_SIZE]:
+        for dy in [-TILE_SIZE, 0, TILE_SIZE]:
             if dx == 0 and dy == 0:
                 continue
 
-            nx = cx + dx
-            ny = cy + dy
+            nx, ny = cx + dx, cy + dy
+
+            if not check_if_in_map_for_monster(nx, ny):
+                continue
+
+            row, col = int(ny / TILE_SIZE), int(nx / TILE_SIZE)
+            if state.game_map[row][col] == "#":  # wall
+                continue
 
             step_cost = pitagoras(dx, dy)
             G_cost = g + step_cost
-
             H_cost = pitagoras(target[0] - nx, target[1] - ny)
             F_cost = G_cost + H_cost
 
             neighbor_node = Node((nx, ny, G_cost, H_cost, F_cost))
             neighbor_node.next = current_node
+            neighbors.append(neighbor_node)
 
-            neighbor_nodes.append(neighbor_node)
+    return neighbors
 
-    return neighbor_nodes
-
-def A_star_algorythm(start, target):
+def A_star_algorythm(start, target, desired_range):
 
     open_heap = []
     closed_set = set()
 
-    start_h = pitagoras(target[0]-start[0], target[1]-start[1])
+    start_h = pitagoras(target[0] - start[0], target[1] - start[1])
     start_node = Node((start[0], start[1], 0, start_h, start_h))
 
-    heapq.heappush(open_heap, (start_node.data[4], start_node))
+    heapq.heappush(open_heap, (start_node.data[4], next(counter), start_node))
 
     while open_heap:
 
-        _, current_node = heapq.heappop(open_heap)
+        _, _, current_node = heapq.heappop(open_heap)
 
         cx, cy = current_node.data[0], current_node.data[1]
 
@@ -574,8 +609,9 @@ def A_star_algorythm(start, target):
 
         closed_set.add((cx, cy))
 
-        if current_node.data[3] < TILE_SIZE:
-            return current_node
+        if current_node.data[3] < TILE_SIZE * (desired_range - 1):
+            path = reverse_node_chain(current_node).next
+            return path if path else current_node   # ensures not None
 
         neighbors = find_neighbors(current_node, target)
 
@@ -583,14 +619,20 @@ def A_star_algorythm(start, target):
 
             nx, ny = neighbor.data[0], neighbor.data[1]
 
-            # wall check can go here later
-            # if is_wall(nx, ny): continue
+            row = int(ny / TILE_SIZE)
+            col = int(nx / TILE_SIZE)
+
+            if 0 <= row < len(state.game_map) and 0 <= col < len(state.game_map[0]):
+                if state.game_map[row][col] == ".":
+                    continue
 
             if (nx, ny) in closed_set:
                 continue
 
-            heapq.heappush(open_heap, (neighbor.data[4], neighbor))
+            heapq.heappush(open_heap, (neighbor.data[4], next(counter), neighbor))
 
+    # 🔧 IMPORTANT: fallback if no path found
+    return None
 
 def get_next_bullet_position(x, y, angle_degrees):
     angle_rad = math.radians(angle_degrees)
@@ -615,6 +657,8 @@ def check_movement(new_pos, old_pos):
 def spawn_random_monsters(amount):
     tiles_high = len(state.game_map)
     tiles_wide = len(state.game_map[0])
+    global monsters_list
+    monsters_list = []
 
     spawned = 0
 
@@ -628,15 +672,8 @@ def spawn_random_monsters(amount):
             pixel_x = float(tile_x * TILE_SIZE)
             pixel_y = float(tile_y * TILE_SIZE)
 
-            new_id = random.randint(1, 1000000)
-            while new_id in state.monsters:
-                new_id = random.randint(1, 1000000)
-
-            state.monsters[new_id] = {
-                "x": pixel_x,
-                "y": pixel_y,
-                "hp": 100
-            }
+            monster = Monster(pixel_x, pixel_y, 100)
+            monsters_list.append(monster)
 
             spawned += 1
 
@@ -681,21 +718,55 @@ def spawn_loot_per_camera_zone(game_map, per_zone=2):
 
                     spawned += 1
 
-def monsters_manager():
+async def monsters_manager():
+    """Continuously update monsters' positions efficiently."""
+    global monsters_list
+    if not monsters_list:
+        return  # safety: no monsters
+
     while True:
-        for i in range(MONSTERS_AMOUNT):
+        now = time.time()
+        monster_message = ""
 
-            monster_x = state.monsters[i+1]["x"]
-            monster_y = state.monsters[i+1]["y"]
+        for monster in monsters_list:
+            if monster is None:
+                continue  # skip invalid entries
 
-            player_x, player_y = find_nearest_player(monster_x, monster_y)
+            # Only update nearest player if necessary
+            if monster.path is None or monster.path.next is None:
+                monster.nearest_player = find_nearest_player(monster.x, monster.y)
 
-            monster_pos = monster_x + "," + monster_y
-            player_pos = str(player_x) + "," + str(player_y)
+            # Recalculate path only if needed
+            if (
+                monster.path is None
+                or monster.path.next is None
+                or now - monster.last_path_time >= MONSTER_CHANGE_PATH_EVERY_SET_SECONDS
+            ):
+                new_path = A_star_algorythm((monster.x, monster.y),monster.nearest_player,monster.weapon[2])
+                if new_path:
+                    monster.path = new_path
+                    monster.last_path_time = now
 
-            node = A_star_algorythm(monster_pos , player_pos)
+            # Move along path if it exists
+            if monster.path:
+                monster.x = monster.path.data[0]
+                monster.y = monster.path.data[1]
+                monster.path = monster.path.next
 
+            monster_message += f"|{monster.x},{monster.y},{monster.hp}"
 
+        if monster_message:
+            broadcast_monster(monster_message)
+
+        await asyncio.sleep(0.5)
+
+def broadcast_monster(monsters_message: str):
+    msg = f"MONSTERS{monsters_message}\n".encode()
+    for client in list(state.active_clients):
+        if client.stream_id is None:
+            continue
+        client._quic.send_stream_data(client.stream_id, msg, end_stream=False)
+        client.transmit()
 # ---------- Server entry ---------- #
 
 async def check_cpu():
@@ -722,6 +793,7 @@ async def main():
     ))
 
     asyncio.create_task(check_cpu())
+    asyncio.create_task(monsters_manager())
     await asyncio.Future()
 
 
