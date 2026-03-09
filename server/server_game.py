@@ -16,7 +16,7 @@ MAX_BULLETS = 1000
 TILE_SIZE = 64
 TOLERANCE = 70
 BULLETS_MOVE_TIME = 0.01
-MONSTERS_AMOUNT = 10000
+MONSTERS_AMOUNT = 5000
 SCREEN_WIDTH = 1920
 SCREEN_HEIGHT = 1080
 MAX_WEAPONS = 9000
@@ -514,6 +514,7 @@ class Node:
     self.data = data
     self.next = None
 
+
 class Monster:
     def __init__(self, x, y, hp):
         self.hp = hp
@@ -521,8 +522,15 @@ class Monster:
         self.x = x
         self.y = y
         self.nearest_player = find_nearest_player(self.x, self.y)
-        self.path = A_star_algorythm((self.x, self.y), self.nearest_player, self.weapon[2])
+
+        if self.nearest_player:
+            self.path = A_star_algorythm((self.x, self.y), self.nearest_player, TILE_SIZE)
+        else:
+            self.path = None
+
         self.last_path_time = time.time()
+        # מונע מצב שכל המפלצות יורות באותה אלפית שנייה כשהן נוצרות
+        self.last_shot_time = time.time() - random.uniform(0, 2)
 
     def take_damage(self, damage):
         self.hp -= damage
@@ -538,6 +546,8 @@ class Monster:
             self.y = pixel_y
 
             while state.game_map[tile_y][tile_x] != ".":
+                tile_x = random.randint(0, tiles_wide - 1)
+                tile_y = random.randint(0, tiles_high - 1)
                 pixel_x = float(tile_x * TILE_SIZE)
                 pixel_y = float(tile_y * TILE_SIZE)
                 self.x = pixel_x
@@ -546,9 +556,82 @@ class Monster:
             self.hp = 100
             self.weapon = random.choice(WEAPON_LIST)
             self.nearest_player = find_nearest_player(self.x, self.y)
-            self.path = A_star_algorythm((self.x, self.y), self.nearest_player, self.weapon[2])
-            self.last_path_time = time.time()
 
+            if self.nearest_player:
+                self.path = A_star_algorythm((self.x, self.y), self.nearest_player, TILE_SIZE)
+            else:
+                self.path = None
+
+            self.last_path_time = time.time()
+            self.last_shot_time = time.time()
+
+
+async def monster_gun_tracking(bullet_id: int, gun_type: str, start_x: float, start_y: float, angle: float):
+    if bullet_id not in state.active_bullets:
+        return
+
+    gun_range = 0
+    gun_damage = 0
+    for i in range(len(WEAPON_NAMES)):
+        if WEAPON_NAMES[i] == gun_type:
+            gun_damage = int(WEAPON_DAMAGE[i])
+            gun_range = int(WEAPON_RANGE[i])
+
+    x = start_x
+    y = start_y
+    pos = f"{x},{y}"
+
+    # משדרים לכולם שנוצר כדור חדש
+    msg_show = f"SHOW-BULLET|{pos}|{angle}|{bullet_id}\n".encode()
+    for client in list(state.active_clients):
+        if client.stream_id is not None:
+            client._quic.send_stream_data(client.stream_id, msg_show, end_stream=False)
+            client.transmit()
+
+    for _ in range(gun_range):
+        x, y = get_next_bullet_position(x, y, angle)
+        if bullet_id in state.active_bullets:
+            state.active_bullets[bullet_id]["x"] = x
+            state.active_bullets[bullet_id]["y"] = y
+
+        # עצירה כשהכדור פוגע בקיר או יוצא מהמפה
+        if not check_if_in_map(x, y):
+            break
+        if state.game_map[int(y / TILE_SIZE)][int(x / TILE_SIZE)] == "#":
+            break
+
+        hit_player = False
+
+        # בדיקת פגיעה בשחקנים
+        for player_id, pos_str in list(state.players_pos.items()):
+            try:
+                px, py = map(float, pos_str.split(","))
+            except:
+                continue
+
+            if abs(px - x) <= TOLERANCE and abs(py - y) <= TOLERANCE:
+                hit_player = True
+                # מחפשים את החיבור של השחקן כדי להוריד לו חיים בעזרת מערכת הנזק הקיימת
+                for client in list(state.active_clients):
+                    if client._quic.host_cid.hex() == player_id:
+                        client.damage(player_id, gun_damage)
+                        break
+                break
+
+        if hit_player:
+            break
+
+        await asyncio.sleep(BULLETS_MOVE_TIME)
+
+    # מוחקים את הכדור מהרשימה ומשדרים מחיקה לכולם
+    if bullet_id in state.active_bullets:
+        del state.active_bullets[bullet_id]
+
+    msg_del = f"DEL-BULLET|{bullet_id}\n".encode()
+    for client in list(state.active_clients):
+        if client.stream_id is not None:
+            client._quic.send_stream_data(client.stream_id, msg_del, end_stream=False)
+            client.transmit()
 
 
 def pitagoras(x,y):
@@ -581,16 +664,30 @@ def check_if_in_map(x, y):
 
     return True
 
+
 def find_nearest_player(monster_x, monster_y):
-    min_x = 10000000
-    min_y = 10000000
+    # אם אין שחקנים מחוברים, אין את מי לחפש
+    if not state.players_pos:
+        return None
+
+    min_dist = float('inf')
+    closest_player = None
+
     for other_id, pos in state.players_pos.items():
-        player_x = float(pos.split(",")[0])
-        player_y = float(pos.split(",")[1])
-        if (player_x*player_x + player_y*player_y) < (min_x*min_x + min_y*min_y):
-            min_x = player_x
-            min_y = player_y
-    return min_x, min_y
+        try:
+            player_x = float(pos.split(",")[0])
+            player_y = float(pos.split(",")[1])
+        except:
+            continue
+
+        # חישוב מרחק מהמפלצת (ולא מ-0,0)
+        dist = (player_x - monster_x) ** 2 + (player_y - monster_y) ** 2
+
+        if dist < min_dist:
+            min_dist = dist
+            closest_player = (player_x, player_y)
+
+    return closest_player
 
 def check_if_in_map_for_monster(x, y):
     """Return True if monster's position is inside map bounds."""
@@ -598,80 +695,78 @@ def check_if_in_map_for_monster(x, y):
     y_tile = int(y / TILE_SIZE)
     return 0 <= y_tile < len(state.game_map) and 0 <= x_tile < len(state.game_map[0])
 
-def find_neighbors(current_node, target):
-    """Generate valid neighboring nodes for A* pathfinding, skipping walls."""
-    cx, cy, g = current_node.data[0], current_node.data[1], current_node.data[2]
-    neighbors = []
 
-    for dx in [-TILE_SIZE, 0, TILE_SIZE]:
-        for dy in [-TILE_SIZE, 0, TILE_SIZE]:
-            if dx == 0 and dy == 0:
-                continue
-
-            nx, ny = cx + dx, cy + dy
-
-            if not check_if_in_map_for_monster(nx, ny):
-                continue
-
-            row, col = int(ny / TILE_SIZE), int(nx / TILE_SIZE)
-            if state.game_map[row][col] == "#":  # wall
-                continue
-
-            step_cost = pitagoras(dx, dy)
-            G_cost = g + step_cost
-            H_cost = pitagoras(target[0] - nx, target[1] - ny)
-            F_cost = G_cost + H_cost
-
-            neighbor_node = Node((nx, ny, G_cost, H_cost, F_cost))
-            neighbor_node.next = current_node
-            neighbors.append(neighbor_node)
-
-    return neighbors
 
 def A_star_algorythm(start, target, desired_range):
-
+    # OPEN //the set of nodes to be evaluated
     open_heap = []
+    open_dict = {}  # Keeps track of the best g_cost for nodes in OPEN: { (x,y): g_cost }
+
+    # CLOSED //the set of nodes already evaluated
     closed_set = set()
 
     start_h = pitagoras(target[0] - start[0], target[1] - start[1])
+    # Node data structure: (x, y, g_cost, h_cost, f_cost)
     start_node = Node((start[0], start[1], 0, start_h, start_h))
 
+    # add the start node to OPEN
     heapq.heappush(open_heap, (start_node.data[4], next(counter), start_node))
+    open_dict[(start[0], start[1])] = 0
 
-    while open_heap:
+    iterations = 0
+    MAX_ITERATIONS = 400
 
+    # loop
+    while open_heap and iterations < MAX_ITERATIONS:
+        iterations += 1
+        # current = node in OPEN with the lowest f_cost
         _, _, current_node = heapq.heappop(open_heap)
+        cx, cy, cg = current_node.data[0], current_node.data[1], current_node.data[2]
 
-        cx, cy = current_node.data[0], current_node.data[1]
-
+        # remove current from OPEN
         if (cx, cy) in closed_set:
             continue
 
+        # add current to CLOSED
         closed_set.add((cx, cy))
 
-        if current_node.data[3] < TILE_SIZE * (desired_range - 1):
-            path = reverse_node_chain(current_node).next
-            return path if path else current_node   # ensures not None
+        # התיקון הקריטי: desired_range מגיע כבר בפיקסלים מהנשק, אז לא צריך להכפיל שוב
+        if current_node.data[3] <= desired_range:
+            path = reverse_node_chain(current_node)
+            return path.next if path and path.next else current_node
 
-        neighbors = find_neighbors(current_node, target)
-
-        for neighbor in neighbors:
-
-            nx, ny = neighbor.data[0], neighbor.data[1]
-
-            row = int(ny / TILE_SIZE)
-            col = int(nx / TILE_SIZE)
-
-            if 0 <= row < len(state.game_map) and 0 <= col < len(state.game_map[0]):
-                if state.game_map[row][col] == ".":
+        # foreach neighbour of the current node
+        for dx in [-TILE_SIZE, 0, TILE_SIZE]:
+            for dy in [-TILE_SIZE, 0, TILE_SIZE]:
+                if dx == 0 and dy == 0:
                     continue
 
-            if (nx, ny) in closed_set:
-                continue
+                nx, ny = cx + dx, cy + dy
 
-            heapq.heappush(open_heap, (neighbor.data[4], next(counter), neighbor))
+                # if neighbour is not traversable or neighbour is in CLOSED
+                if not check_if_in_map_for_monster(nx, ny):
+                    continue
+                row, col = int(ny / TILE_SIZE), int(nx / TILE_SIZE)
+                if state.game_map[row][col] == "#":
+                    continue
+                if (nx, ny) in closed_set:
+                    continue
 
-    # 🔧 IMPORTANT: fallback if no path found
+                # Calculate distances and costs
+                step_cost = pitagoras(dx, dy)
+                new_g = cg + step_cost
+                h_cost = pitagoras(target[0] - nx, target[1] - ny)
+                new_f = new_g + h_cost
+
+                # if new path to neighbour is shorter OR neighbour is not in OPEN
+                if (nx, ny) not in open_dict or new_g < open_dict[(nx, ny)]:
+                    open_dict[(nx, ny)] = new_g
+
+                    neighbor_node = Node((nx, ny, new_g, h_cost, new_f))
+                    neighbor_node.next = current_node
+
+                    heapq.heappush(open_heap, (new_f, next(counter), neighbor_node))
+
     return None
 
 def get_next_bullet_position(x, y, angle_degrees):
@@ -758,45 +853,74 @@ def spawn_loot_per_camera_zone(game_map, per_zone=2):
 
                     spawned += 1
 
+
 async def monsters_manager():
-    """Continuously update monsters' positions efficiently."""
+    """Continuously update monsters' positions efficiently and handle shooting."""
     global monsters_list
     if not monsters_list:
-        return  # safety: no monsters
+        return
 
     while True:
         now = time.time()
 
-        for monster in monsters_list:
+        for i, monster in enumerate(monsters_list):
             if monster is None:
-                continue  # skip invalid entries
+                continue
 
-            # Only update nearest player if necessary
-            if monster.path is None or monster.path.next is None:
-                monster.nearest_player = find_nearest_player(monster.x, monster.y)
+            monster.nearest_player = find_nearest_player(monster.x, monster.y)
 
-            # Recalculate path only if needed
+            if not monster.nearest_player:
+                monster.path = None
+                continue
+
+            dist_to_player = pitagoras(monster.x - monster.nearest_player[0], monster.y - monster.nearest_player[1])
+
+            if dist_to_player > 1500:
+                monster.path = None
+                continue
+
+            # --- הגיון הלחימה של המפלצת ---
+            # אם השחקן בטווח הנשק של המפלצת
+            if dist_to_player <= monster.weapon[2]:
+                # יורה רק אם עברו 2 שניות מהירייה הקודמת
+                if now - monster.last_shot_time >= 2.0:
+                    # מחשבים את הזווית אל השחקן
+                    angle = math.degrees(
+                        math.atan2(monster.nearest_player[1] - monster.y, monster.nearest_player[0] - monster.x))
+
+                    new_id = random.randint(1, MAX_BULLETS)
+                    while new_id in state.active_bullets:
+                        new_id = random.randint(1, MAX_BULLETS)
+
+                    state.active_bullets[new_id] = {
+                        "x": monster.x,
+                        "y": monster.y,
+                        "angle": angle,
+                    }
+
+                    # קוראים לפונקציה שיצרנו כדי להזיז את הכדור
+                    asyncio.create_task(monster_gun_tracking(new_id, monster.weapon[0], monster.x, monster.y, angle))
+                    monster.last_shot_time = now
+
+            # --- הגיון התזוזה של המפלצת ---
             if (
-                monster.path is None
-                or monster.path.next is None
-                or now - monster.last_path_time >= MONSTER_CHANGE_PATH_EVERY_SET_SECONDS
+                    monster.path is None
+                    or now - monster.last_path_time >= MONSTER_CHANGE_PATH_EVERY_SET_SECONDS
             ):
-                new_path = A_star_algorythm((monster.x, monster.y),monster.nearest_player,monster.weapon[2])
-                if new_path:
-                    monster.path = new_path
-                    monster.last_path_time = now
+                new_path = A_star_algorythm((monster.x, monster.y), monster.nearest_player, TILE_SIZE)
+                monster.path = new_path
+                monster.last_path_time = now
 
-            # Move along path if it exists
             if monster.path:
                 monster.x = monster.path.data[0]
                 monster.y = monster.path.data[1]
                 monster.path = monster.path.next
 
+            if i % 50 == 0:
+                await asyncio.sleep(0)
 
         broadcast_visible_monsters()
-
         await asyncio.sleep(0.5)
-
 
 def broadcast_visible_monsters():
     half_width = (SCREEN_WIDTH / 2) + TILE_SIZE
