@@ -37,7 +37,7 @@ async def quic_network_loop():
 
     async with connect(SERVER_IP, SERVER_PORT, configuration=config) as client:
         stream_reader, stream_writer = await client.create_stream()
-
+        print("Connected to server!")
         async def read_from_server():
             buffer = ""
             while True:
@@ -124,35 +124,35 @@ def collides_with_wall(game_map, x, y, size, tile_size):
 
     return False
 
-def spawn_loot_per_camera_zone(game_map, tile_size, loot_pool, screen_width, screen_height, per_zone=2):
-    """
-    Spawn loot so that each camera-sized zone has at least `per_zone` items.
-    """
-    loot_list = []
-
-    tiles_wide = len(game_map[0])
-    tiles_high = len(game_map)
-
-    zone_tiles_x = screen_width // tile_size
-    zone_tiles_y = screen_height // tile_size
-
-    for win_y in range(0, tiles_high, zone_tiles_y):
-        for win_x in range(0, tiles_wide, zone_tiles_x):
-            spawned = 0
-            attempts = 0
-            while spawned < per_zone and attempts < 50:
-                attempts += 1
-                tile_x = random.randint(win_x, min(win_x + zone_tiles_x - 1, tiles_wide - 1))
-                tile_y = random.randint(win_y, min(win_y + zone_tiles_y - 1, tiles_high - 1))
-
-                if game_map[tile_y][tile_x] != "#":  # רק על רצפה
-                    x = tile_x * tile_size
-                    y = tile_y * tile_size
-                    item_type, name, image = random.choice(loot_pool)
-                    loot_list.append(Item(x, y, image, item_type, name))
-                    spawned += 1
-
-    return loot_list
+# def spawn_loot_per_camera_zone(game_map, tile_size, loot_pool, screen_width, screen_height, per_zone=2):
+#     """
+#     Spawn loot so that each camera-sized zone has at least `per_zone` items.
+#     """
+#     loot_list = []
+#
+#     tiles_wide = len(game_map[0])
+#     tiles_high = len(game_map)
+#
+#     zone_tiles_x = screen_width // tile_size
+#     zone_tiles_y = screen_height // tile_size
+#
+#     for win_y in range(0, tiles_high, zone_tiles_y):
+#         for win_x in range(0, tiles_wide, zone_tiles_x):
+#             spawned = 0
+#             attempts = 0
+#             while spawned < per_zone and attempts < 50:
+#                 attempts += 1
+#                 tile_x = random.randint(win_x, min(win_x + zone_tiles_x - 1, tiles_wide - 1))
+#                 tile_y = random.randint(win_y, min(win_y + zone_tiles_y - 1, tiles_high - 1))
+#
+#                 if game_map[tile_y][tile_x] != "#":  # רק על רצפה
+#                     x = tile_x * tile_size
+#                     y = tile_y * tile_size
+#                     item_type, name, image = random.choice(loot_pool)
+#                     loot_list.append(Item(x, y, image, item_type, name))
+#                     spawned += 1
+#
+#     return loot_list
 
 def draw_inventory(screen, player):
     slot_size = 64
@@ -201,6 +201,23 @@ class Item:
 
     def draw(self, screen, camera_x, camera_y):
         screen.blit(self.image, (self.x - camera_x, self.y - camera_y))
+
+# ---------------- Item CLASS ---------------- #
+class Monster:
+    def __init__(self, x, y, hp , image):
+        self.x = x
+        self.y = y
+        self.hp = hp
+        self.image = image
+        self.size = 64
+        self.rect = pygame.Rect(x, y, self.size, self.size)
+
+    def update(self):
+        self.rect.topleft = (self.x, self.y)
+
+    def draw(self, screen, camera_x, camera_y):
+        screen.blit(self.image, (self.rect.x - camera_x, self.rect.y - camera_y))
+
 
 # ---------------- PLAYER CLASS ---------------- #
 class Player:
@@ -501,6 +518,7 @@ def main():
 
     # loot_items = spawn_loot_per_camera_zone(game_map, tile_size, loot_pool, screen.get_width(), screen.get_height(),per_zone=1)
     loot_items = []
+    monsters=[]
     # print("Loot spawned:", len(loot_items))
     # print("First loot at:", loot_items[0].x, loot_items[0].y)
     bullets = {} #bullet id -> {x,y,angle}
@@ -658,11 +676,15 @@ def main():
                 x_dropped = float(x_dropped)
                 y_dropped = float(y_dropped)
                 type_dropped = parts[2]
+                print(type_dropped)
                 if type_dropped == "rifle":
                     img = pygame.image.load("img/leftWeapon1.png")
                     img = pygame.transform.scale(img, (64, 64))
                 elif type_dropped == "gun":
                     img = pygame.image.load("img/rightWeapon1.png")
+                    img = pygame.transform.scale(img, (64, 64))
+                elif type_dropped == "rpg":
+                    img = pygame.image.load("img/rpg_right.png")
                     img = pygame.transform.scale(img, (64, 64))
                 else:
                     continue
@@ -691,6 +713,18 @@ def main():
             elif parts[0] == "SETID":
                 if MY_ID == "":
                     MY_ID = parts[1]
+            elif parts[0] == "MONSTERS":
+                monsters.clear()
+                for monster_data in parts[1:]:
+                    x_monster, y_monster,hp_monster= monster_data.split(",")
+                    x_monster = float(x_monster)
+                    y_monster = float(y_monster)
+                    hp_monster = int(hp_monster)
+
+                    img = pygame.image.load("img/monster_down.png")
+                    img = pygame.transform.scale(img, (64, 64))
+                    monsters.append(Monster(x_monster, y_monster, hp_monster,img))
+
 
         # --- CAMERA FOLLOWS PLAYER ---
         camera_x = player.x - screen.get_width() // 2
@@ -706,6 +740,9 @@ def main():
         player.draw(screen, camera_x, camera_y)
         for rp in remote_players.values():
             rp.draw(screen, camera_x, camera_y)
+        for monster in monsters:
+            monster.update()
+            monster.draw(screen, camera_x, camera_y)
 
 
         # calculate the bullets movements and show them

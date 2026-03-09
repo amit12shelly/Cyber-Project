@@ -20,7 +20,7 @@ SCREEN_HEIGHT = 1080
 MAX_WEAPONS = 9000
 AMOUNT_TO_DROP_IN_DEATH = 2
 ENTITIES_SPEED = 4
-WEAPON_LIST = [["gun", 20, TILE_SIZE * 8],["rifle" ,10 , TILE_SIZE * 12]],["rpg",30,TILE_SIZE*25] #-> name,damage,range
+WEAPON_LIST = [["gun", 20, TILE_SIZE * 8],["rifle" ,10 , TILE_SIZE * 12],["rpg",30,TILE_SIZE*25]] #-> name,damage,range
 WEAPON_NAMES = [w[0] for w in WEAPON_LIST]
 WEAPON_DAMAGE = [w[1] for w in WEAPON_LIST]
 WEAPON_RANGE = [w[2] for w in WEAPON_LIST]
@@ -265,7 +265,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                         "type": drop,
                     }
                     # tell everyone about this drop
-                    self.broadcast_drop(pos_str, drop)
+                    self.broadcast_drop(pos_str, drop, False)
 
                 else:  # he wants to drop something that he doesn't have
                     self.disconnect()  # kick the player
@@ -297,10 +297,10 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
     # ---------- Broadcast helpers ---------- #
 
-    def broadcast_drop(self, pos_str, type_str):
+    def broadcast_drop(self, pos_str, type_str, to_yourself):
         msg = f"DROPPED|{pos_str}|{type_str}\n".encode()
         for client in list(state.active_clients):
-            if client == self:
+            if client == self and to_yourself == False:
                 continue
             if client.stream_id is None:
                 continue
@@ -456,7 +456,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                         "y": y,
                         "type": item
                     }
-                    self.broadcast_drop(pos, item)
+                    self.broadcast_drop(pos, item, True)
                     dropped += 1
                 inv_slot += 1
 
