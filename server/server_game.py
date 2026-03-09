@@ -510,6 +510,25 @@ class Monster:
         self.path = A_star_algorythm((self.x, self.y), self.nearest_player, self.weapon[2])
         self.last_path_time = time.time()
 
+    def take_damage(self, damage):
+        self.hp -= damage
+        if damage <= 0:
+            tiles_high = len(state.game_map)
+            tiles_wide = len(state.game_map[0])
+            tile_x = random.randint(0, tiles_wide - 1)
+            tile_y = random.randint(0, tiles_high - 1)
+            if state.game_map[tile_y][tile_x] == ".":
+                pixel_x = float(tile_x * TILE_SIZE)
+                pixel_y = float(tile_y * TILE_SIZE)
+            self.hp = 100
+            self.weapon = random.choice(WEAPON_LIST)
+            self.x = pixel_x
+            self.y = pixel_y
+            self.nearest_player = find_nearest_player(self.x, self.y)
+            self.path = A_star_algorythm((self.x, self.y), self.nearest_player, self.weapon[2])
+            self.last_path_time = time.time()
+
+
 
 def pitagoras(x,y):
     return math.sqrt((x*x)+(y*y))
