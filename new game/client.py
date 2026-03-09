@@ -204,7 +204,7 @@ class Item:
 
 # ---------------- Item CLASS ---------------- #
 class Monster:
-    def __init__(self, x, y, hp , image):
+    def __init__(self, x, y, hp, image):
         self.x = x
         self.y = y
         self.hp = hp
@@ -216,8 +216,22 @@ class Monster:
         self.rect.topleft = (self.x, self.y)
 
     def draw(self, screen, camera_x, camera_y):
-        screen.blit(self.image, (self.rect.x - camera_x, self.rect.y - camera_y))
+        draw_x = self.rect.x - camera_x
+        draw_y = self.rect.y - camera_y
 
+        screen.blit(self.image, (draw_x, draw_y))
+
+        if -self.size <= draw_x <= screen.get_width() and -self.size <= draw_y <= screen.get_height():
+            bar_width = 100
+            bar_height = 5
+            bar_x = draw_x + (self.size // 2) - (bar_width // 2)
+            bar_y = draw_y - 10
+
+            pygame.draw.rect(screen, (255, 0, 0), (bar_x, bar_y, bar_width, bar_height))
+
+            if self.hp > 0:
+                current_hp_width = min(self.hp, bar_width)
+                pygame.draw.rect(screen, (0, 255, 0), (bar_x, bar_y, current_hp_width, bar_height))
 
 # ---------------- PLAYER CLASS ---------------- #
 class Player:

@@ -204,7 +204,7 @@ class Item:
 
 # ---------------- Item CLASS ---------------- #
 class Monster:
-    def __init__(self, x, y, hp , image):
+    def __init__(self, x, y, hp, image):
         self.x = x
         self.y = y
         self.hp = hp
@@ -216,8 +216,22 @@ class Monster:
         self.rect.topleft = (self.x, self.y)
 
     def draw(self, screen, camera_x, camera_y):
-        screen.blit(self.image, (self.rect.x - camera_x, self.rect.y - camera_y))
+        draw_x = self.rect.x - camera_x
+        draw_y = self.rect.y - camera_y
 
+        screen.blit(self.image, (draw_x, draw_y))
+
+        if -self.size <= draw_x <= screen.get_width() and -self.size <= draw_y <= screen.get_height():
+            bar_width = 100
+            bar_height = 5
+            bar_x = draw_x + (self.size // 2) - (bar_width // 2)
+            bar_y = draw_y - 10
+
+            pygame.draw.rect(screen, (255, 0, 0), (bar_x, bar_y, bar_width, bar_height))
+
+            if self.hp > 0:
+                current_hp_width = min(self.hp, bar_width)
+                pygame.draw.rect(screen, (0, 255, 0), (bar_x, bar_y, current_hp_width, bar_height))
 
 # ---------------- PLAYER CLASS ---------------- #
 class Player:
@@ -493,7 +507,7 @@ def main():
     bullet_img = pygame.transform.scale(bullet_img, (10.7 ,5.4))
     game_map = load_map("map.txt")
 
-    player = Player(130, 130)
+    player = Player(128, 128)
     chat_font = pygame.font.SysFont("monospace", CHAT_FONT_SIZE)
     chat_open = False
     chat_input = ""
@@ -508,6 +522,8 @@ def main():
         "gun": pygame.transform.scale(pygame.image.load("img/rightWeapon1.png").convert_alpha(), (64, 64)),
         "rpg": pygame.transform.scale(pygame.image.load("img/rpg_right.png").convert_alpha(), (64, 64))
     }
+    monster_img = pygame.transform.scale(pygame.image.load("img/monster_down.png").convert_alpha(), (64, 64))
+
     remote_players = {}
     # Loot pool (מאגר פריטים)
 
@@ -671,16 +687,10 @@ def main():
                     continue
 
                 x_dropped, y_dropped = parts[1].split(",")
-
                 x_dropped = float(x_dropped)
-
                 y_dropped = float(y_dropped)
-
                 type_dropped = parts[2]
 
-                print(type_dropped)
-
-                # שולף את התמונה מהמילון שטעינו מראש במקום לקרוא מהדיסק
 
                 if type_dropped in weapon_images:
 
@@ -691,6 +701,7 @@ def main():
                 else:
 
                     print(f"Warning: Unknown weapon type dropped: {type_dropped}")
+
             elif parts[0] == "UNDROPPED":
                 if len(parts) < 3:
                     continue
@@ -723,9 +734,7 @@ def main():
                     y_monster = float(y_monster)
                     hp_monster = int(hp_monster)
 
-                    img = pygame.image.load("img/monster_down.png")
-                    img = pygame.transform.scale(img, (64, 64))
-                    monsters.append(Monster(x_monster, y_monster, hp_monster,img))
+                    monsters.append(Monster(x_monster, y_monster, hp_monster,monster_img))
 
 
         # --- CAMERA FOLLOWS PLAYER ---

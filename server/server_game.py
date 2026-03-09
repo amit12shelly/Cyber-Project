@@ -439,6 +439,20 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                         self.damage(player_id, gun_damage)
                         return
 
+
+            for monster in monsters_list:
+                try:
+                    px = monster.x
+                    py = monster.y
+                except:
+                    print("Error while splitting the in the gun_tracking!")
+                    return
+                if abs(px - x) <= TOLERANCE and abs(py - y) <= TOLERANCE:
+                    del state.active_bullets[bullet_id]
+                    self.broadcast_del_bullet(str(bullet_id))
+                    monster.take_damage(gun_damage)
+                    return
+
             await asyncio.sleep(BULLETS_MOVE_TIME)
 
         if bullet_id in state.active_bullets:
