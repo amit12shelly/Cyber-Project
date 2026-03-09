@@ -683,6 +683,9 @@ def main():
                 elif type_dropped == "gun":
                     img = pygame.image.load("img/rightWeapon1.png")
                     img = pygame.transform.scale(img, (64, 64))
+                elif type_dropped == "rpg":
+                    img = pygame.image.load("img/rpg_right.png")
+                    img = pygame.transform.scale(img, (64, 64))
                 else:
                     continue
                 loot_items.append(Item(x_dropped,y_dropped,img,"weapon",type_dropped))
