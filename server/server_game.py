@@ -16,7 +16,7 @@ MAX_BULLETS = 1000
 TILE_SIZE = 64
 TOLERANCE = 70
 BULLETS_MOVE_TIME = 0.01
-MONSTERS_AMOUNT = 10000
+MONSTERS_AMOUNT = 1
 SCREEN_WIDTH = 1920
 SCREEN_HEIGHT = 1080
 MAX_WEAPONS = 9000
@@ -524,25 +524,6 @@ class Monster:
         self.path = A_star_algorythm((self.x, self.y), self.nearest_player, self.weapon[2])
         self.last_path_time = time.time()
 
-    def take_damage(self, damage):
-        self.hp -= damage
-        if damage <= 0:
-            tiles_high = len(state.game_map)
-            tiles_wide = len(state.game_map[0])
-            tile_x = random.randint(0, tiles_wide - 1)
-            tile_y = random.randint(0, tiles_high - 1)
-            if state.game_map[tile_y][tile_x] == ".":
-                pixel_x = float(tile_x * TILE_SIZE)
-                pixel_y = float(tile_y * TILE_SIZE)
-            self.hp = 100
-            self.weapon = random.choice(WEAPON_LIST)
-            self.x = pixel_x
-            self.y = pixel_y
-            self.nearest_player = find_nearest_player(self.x, self.y)
-            self.path = A_star_algorythm((self.x, self.y), self.nearest_player, self.weapon[2])
-            self.last_path_time = time.time()
-
-
 
 def pitagoras(x,y):
     return math.sqrt((x*x)+(y*y))
@@ -768,6 +749,7 @@ async def monsters_manager():
             # Only update nearest player if necessary
             if monster.path is None or monster.path.next is None:
                 monster.nearest_player = find_nearest_player(monster.x, monster.y)
+                print(monster.nearest_player)
 
             # Recalculate path only if needed
             if (
@@ -776,6 +758,12 @@ async def monsters_manager():
                 or now - monster.last_path_time >= MONSTER_CHANGE_PATH_EVERY_SET_SECONDS
             ):
                 new_path = A_star_algorythm((monster.x, monster.y),monster.nearest_player,monster.weapon[2])
+                print("ran algorithm")
+                print_path = monster.path
+                while print_path.next is not None:
+                    print(print_path.data[0], print_path.data[1])
+                    print_path = print_path.next
+                print(print_path.data[0], print_path.data[1])
                 if new_path:
                     monster.path = new_path
                     monster.last_path_time = now
@@ -784,7 +772,11 @@ async def monsters_manager():
             if monster.path:
                 monster.x = monster.path.data[0]
                 monster.y = monster.path.data[1]
-                monster.path = monster.path.next
+                print(f"x: {monster.x}, y: {monster.y}")
+                if monster.path.next is not None:
+                    monster.path = monster.path.next
+                    print(f"new x: {monster.path.data[0]}, y: {monster.path.data[1]}")
+                print("no new path")
 
             monster_message += f"|{monster.x},{monster.y},{monster.hp}"
 
