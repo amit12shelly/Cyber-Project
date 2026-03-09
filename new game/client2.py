@@ -503,18 +503,13 @@ def main():
     outgoing_messages.put(f"UPDATE|{player.x},{player.y}")
 
     # --- LOAD LOOT IMAGES ---
-    gun1_img = pygame.transform.scale(
-        pygame.image.load("img/rightWeapon1.png").convert_alpha(), (64, 64)
-    )
-    gun2_img = pygame.transform.scale(
-        pygame.image.load("img/rightWeapon2.png").convert_alpha(), (64, 64)
-    )
+    weapon_images = {
+        "rifle": pygame.transform.scale(pygame.image.load("img/leftWeapon1.png").convert_alpha(), (64, 64)),
+        "gun": pygame.transform.scale(pygame.image.load("img/rightWeapon1.png").convert_alpha(), (64, 64)),
+        "rpg": pygame.transform.scale(pygame.image.load("img/rpg_right.png").convert_alpha(), (64, 64))
+    }
     remote_players = {}
     # Loot pool (מאגר פריטים)
-    loot_pool = [
-        ("weapon", "gun", gun1_img),
-        ("weapon", "shotGun", gun2_img),
-    ]
 
     # loot_items = spawn_loot_per_camera_zone(game_map, tile_size, loot_pool, screen.get_width(), screen.get_height(),per_zone=1)
     loot_items = []
@@ -669,26 +664,33 @@ def main():
                 except:
                     pass
 
+
             elif parts[0] == "DROPPED":
+
                 if len(parts) < 3:
                     continue
+
                 x_dropped, y_dropped = parts[1].split(",")
+
                 x_dropped = float(x_dropped)
+
                 y_dropped = float(y_dropped)
+
                 type_dropped = parts[2]
+
                 print(type_dropped)
-                if type_dropped == "rifle":
-                    img = pygame.image.load("img/leftWeapon1.png")
-                    img = pygame.transform.scale(img, (64, 64))
-                elif type_dropped == "gun":
-                    img = pygame.image.load("img/rightWeapon1.png")
-                    img = pygame.transform.scale(img, (64, 64))
-                elif type_dropped == "rpg":
-                    img = pygame.image.load("img/rpg_right.png")
-                    img = pygame.transform.scale(img, (64, 64))
+
+                # שולף את התמונה מהמילון שטעינו מראש במקום לקרוא מהדיסק
+
+                if type_dropped in weapon_images:
+
+                    img = weapon_images[type_dropped]
+
+                    loot_items.append(Item(x_dropped, y_dropped, img, "weapon", type_dropped))
+
                 else:
-                    continue
-                loot_items.append(Item(x_dropped,y_dropped,img,"weapon",type_dropped))
+
+                    print(f"Warning: Unknown weapon type dropped: {type_dropped}")
             elif parts[0] == "UNDROPPED":
                 if len(parts) < 3:
                     continue
