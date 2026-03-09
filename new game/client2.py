@@ -491,7 +491,7 @@ def get_next_bullet_position(x, y, angle_degrees):
 def main():
     global MY_ID
     pygame.init()
-    screen = pygame.display.set_mode((1280, 720))
+    screen = pygame.display.set_mode((1920, 1080))
     pygame.display.set_caption("Game")
     clock = pygame.time.Clock()
 
