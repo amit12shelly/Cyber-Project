@@ -460,13 +460,22 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                     dropped += 1
                 inv_slot += 1
 
-
-            inv_slot = 0
-            while inv_slot < INVENTORY_SIZE:
-                state.players_inventory[client_id][inv_slot] = "none"
-                inv_slot += 1
-
             self.broadcast_remove(client_id)
+
+            if client_id in state.players_pos:
+                del state.players_pos[client_id]
+            if client_id in state.players_hp:
+                del state.players_hp[client_id]
+            if client_id in state.players_inventory:
+                del state.players_inventory[client_id]
+            client_to_remove = None
+            for client in state.active_clients:
+                if client._quic.host_cid.hex() == client_id:
+                    client_to_remove = client
+                    break
+
+            if client_to_remove:
+                state.active_clients.remove(client_to_remove)
             print("player killed!")
         else:
             state.players_hp[client_id] = hp - damage
