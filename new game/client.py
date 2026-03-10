@@ -11,6 +11,7 @@ from aioquic.quic.configuration import QuicConfiguration
 SERVER_IP = "127.0.0.1"
 SERVER_PORT = 4433
 TOLERANCE = 5
+UP_HP = 40
 MY_ID = ""
 incoming_messages = Queue()
 outgoing_messages = Queue()
@@ -207,7 +208,22 @@ class Item:
         if -self.size <= draw_x <= screen.get_width() and -self.size <= draw_y <= screen.get_height():
             screen.blit(self.image, (draw_x, draw_y))
 
-# ---------------- Item CLASS ---------------- #
+# ---------------- HP Potion CLASS ---------------- #
+class Potion:
+    def __init__(self,x,y,image):
+        self.image = image
+        self.x = x
+        self.y = y
+        self.size = 64
+
+    def draw(self, screen, camera_x, camera_y):
+        draw_x = self.x - camera_x
+        draw_y = self.y - camera_y
+
+        if -self.size <= draw_x <= screen.get_width() and -self.size <= draw_y <= screen.get_height():
+            screen.blit(self.image, (draw_x, draw_y))
+
+# ---------------- MONSTER CLASS ---------------- #
 class Monster:
     def __init__(self, x, y, hp, image):
         self.x = x
@@ -534,13 +550,15 @@ def main():
         "rpg": pygame.transform.scale(pygame.image.load("img/rpg_right.png").convert_alpha(), (64, 64))
     }
     monster_img = pygame.transform.scale(pygame.image.load("img/monster_down.png").convert_alpha(), (64, 64))
-
+    potion_img =  pygame.transform.scale(pygame.image.load("img/hp_Potion.png").convert_alpha(), (40, 40))
+    
     remote_players = {}
     # Loot pool (מאגר פריטים)
 
     # loot_items = spawn_loot_per_camera_zone(game_map, tile_size, loot_pool, screen.get_width(), screen.get_height(),per_zone=1)
     loot_items = []
     monsters=[]
+    hp_items = []
     # print("Loot spawned:", len(loot_items))
     # print("First loot at:", loot_items[0].x, loot_items[0].y)
     bullets = {} #bullet id -> {x,y,angle}
@@ -579,11 +597,16 @@ def main():
                     print("Auto-walk:", player.auto_walk)
 
                 if event.key == pygame.K_e and len(player.inventory) < 5:
-                    nearby = get_nearby_item(player, loot_items)
-                    if nearby:
-                        player.pick_item(nearby)  # מוסיף ל־Inventory
-                        loot_items.remove(nearby)
-                        outgoing_messages.put(f"PICKUP|{nearby.x},{nearby.y}|{nearby.name}")
+                    nearby_loot = get_nearby_item(player, loot_items)
+                    nearby_potion = get_nearby_item(player,hp_items)
+                    if nearby_loot:
+                        player.pick_item(nearby_loot)  # מוסיף ל־Inventory
+                        loot_items.remove(nearby_loot)
+                        outgoing_messages.put(f"PICKUP|{nearby_loot.x},{nearby_loot.y}|{nearby_loot.name}")
+                    elif nearby_potion and player.hp < 100:
+                        player.hp += UP_HP
+                        hp_items.remove(nearby_potion)
+                        outgoing_messages.put(f"PPICKUP|{nearby_potion.x},{nearby_potion.y}|{player.hp}")
 
                 if event.key == pygame.K_q:
                     slot_to_drop = player.selected_slot
@@ -722,10 +745,16 @@ def main():
                 y_pick = float(y_pick)
                 type_pick = parts[2]
 
-                for item in loot_items:
-                    if item.x==x_pick and item.y == y_pick and item.name == type_pick:
-                        loot_items.remove(item)
-                        break
+                if type_pick != "potion":
+                    for item in loot_items:
+                        if item.x==x_pick and item.y == y_pick and item.name == type_pick:
+                            loot_items.remove(item)
+                            break
+                else:
+                    for potion in hp_items:
+                        if potion.x==x_pick and potion.y == y_pick:
+                            hp_items.remove(potion)
+                            break
 
             elif parts[0] == "CHAT":
                 if len(parts) < 3:
@@ -749,7 +778,15 @@ def main():
                     y_monster = float(y_monster)
                     hp_monster = int(hp_monster)
 
-                    monsters.append(Monster(x_monster, y_monster, hp_monster,monster_img))
+                    if hp_monster > 0:
+                        monsters.append(Monster(x_monster, y_monster, hp_monster,monster_img))
+            elif parts[0] == "POTIONS":
+                for hp_item in parts[1:]:
+                    x_potion, y_potion = hp_item.split(",")
+                    x_potion = float(x_potion)
+                    y_potion = float(y_potion)
+
+                    hp_items.append(Potion(x_potion,y_potion,potion_img))
 
 
         # --- CAMERA FOLLOWS PLAYER ---
@@ -767,9 +804,11 @@ def main():
         for rp in remote_players.values():
             rp.draw(screen, camera_x, camera_y)
         for monster in monsters:
-            monster.update()
-            monster.draw(screen, camera_x, camera_y)
-
+            if camera_x - 100 <= monster.x <= camera_x + screen.get_width() + 100 and camera_y - 100 <= monster.y <= camera_y + screen.get_height() + 100:
+                monster.update()
+                monster.draw(screen, camera_x, camera_y)
+        for hp_item in hp_items:
+            hp_item.draw(screen, camera_x, camera_y)
 
         # calculate the bullets movements and show them
         for i in bullets:

@@ -16,7 +16,7 @@ MAX_BULLETS = 1000
 TILE_SIZE = 64
 TOLERANCE = 70
 BULLETS_MOVE_TIME = 0.01
-MONSTERS_AMOUNT = 5000
+MONSTERS_AMOUNT = 2000
 SCREEN_WIDTH = 1920
 SCREEN_HEIGHT = 1080
 MAX_WEAPONS = 9000
@@ -28,7 +28,8 @@ WEAPON_DAMAGE = [w[1] for w in WEAPON_LIST]
 WEAPON_RANGE = [w[2] for w in WEAPON_LIST]
 MONSTER_CHANGE_PATH_EVERY_SET_SECONDS = 3
 MONSTER_ACCURACY = 65  # 1-100
-
+MAX_POTION = 9000
+POTION_LIST = [["potion", 40]] #-> name,hp++
 counter = count()
 monsters_list = []
 SERVER_FPS = 0
@@ -53,6 +54,7 @@ class GameState:
 
     #monsters info
     monsters = {}  #monster_id -> {x, y, hp, path(A*), last_path_time(last time called A* for this monster)}
+    map_potion = {}
 
 
 state = GameState()
@@ -119,6 +121,10 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             #send all the weapons positions
             for weapon_id, w_data in state.map_weapons.items():
                 msg = f"DROPPED|{w_data['x']},{w_data['y']}|{w_data['type']}\n".encode()
+                if self.stream_id is not None:
+                    self._quic.send_stream_data(self.stream_id, msg, end_stream=False)
+            for potion_id,p_data in state.map_potion.items():
+                msg = f"POTIONS|{p_data['x']},{p_data['y']}\n".encode()
                 if self.stream_id is not None:
                     self._quic.send_stream_data(self.stream_id, msg, end_stream=False)
 
@@ -228,7 +234,6 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                             self.broadcast_undrop(pos_str, state.map_weapons[found_weapon_id]["type"])
                             del state.map_weapons[found_weapon_id]
                             break
-
                 else:  # this weapon does not exist
                     self.disconnect()  # kick the player
                     print("player has been kicked! weapon id = none")
@@ -236,6 +241,44 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             else:  # this weapon does not exist
                 self.disconnect()  # kick the player
                 print("player has been kicked! this weapon does not exist")
+
+        elif data_str.startswith("PPICKUP|"):
+            try:
+                parts = data_str.split("|")
+            except:
+                print("Error while splitting the PPICKUP command!")
+                return
+            if len(parts) < 3:
+                return
+            pickup_pos = parts[1]
+            pickup_hp = parts[2]
+            try:
+                px = float(pickup_pos.split(",")[0])
+                py = float(pickup_pos.split(",")[1])
+            except:
+                print("Error while splitting the pos in the PICKUP command!")
+                return
+            found_potion_id = None
+
+            for p_id, p_data in state.map_potion.items():  # checks if this weapon in real
+                    if abs(p_data["x"] - px) <= TOLERANCE and abs(p_data["y"] - py) <= TOLERANCE:
+                        print("sup dog up the hp")
+                        client_id = self._quic.host_cid.hex()
+                        state.players_hp[client_id] = pickup_hp
+                        found_potion_id = p_id
+                        break
+            if found_potion_id is not None:  # if its real
+                pos_str = f"{state.map_potion[found_potion_id]['x']},{state.map_potion[found_potion_id]['y']}"
+                self.broadcast_undrop(pos_str, "potion")
+                self.broadcast_player(client_id, state.players_pos[client_id], state.players_hp[client_id])
+                del state.map_potion[found_potion_id]
+            else:  # this weapon does not exist
+                self.disconnect()  # kick the player
+                print("player has been kicked! weapon id = none")
+
+
+
+
 
 
 
@@ -855,7 +898,43 @@ def spawn_loot_per_camera_zone(game_map, per_zone=2):
 
                     spawned += 1
 
+def spawn_potions_per_camera_zone(game_map, per_zone=2):
+    """
+    Spawn items so that each camera-sized zone has at least `per_zone` items.
+    מוסיף ישר ל-state.map_items עם ID ייחודי ומיקום.
+    """
+    tiles_wide = len(game_map[0])
+    tiles_high = len(game_map)
 
+    zone_tiles_x = SCREEN_WIDTH // TILE_SIZE
+    zone_tiles_y = SCREEN_HEIGHT // TILE_SIZE
+
+    for win_y in range(0, tiles_high, zone_tiles_y):
+        for win_x in range(0, tiles_wide, zone_tiles_x):
+            spawned = 0
+            attempts = 0
+            while spawned < per_zone and attempts < 50:
+                attempts += 1
+                tile_x = random.randint(win_x, min(win_x + zone_tiles_x - 1, tiles_wide - 1))
+                tile_y = random.randint(win_y, min(win_y + zone_tiles_y - 1, tiles_high - 1))
+
+                # רק על רצפה
+                if game_map[tile_y][tile_x] != "#":
+                    x = tile_x * TILE_SIZE
+                    y = tile_y * TILE_SIZE
+
+                    # צור מזהה ייחודי
+                    new_id = random.randint(1, int(MAX_POTION))
+                    while new_id in state.map_potion:
+                        new_id = random.randint(1, int(MAX_POTION))
+
+                    # הכנס למפה
+                    state.map_potion[new_id] = {
+                        "x": x,
+                        "y": y
+                    }
+
+                    spawned += 1
 async def monsters_manager():
     """Continuously update monsters' positions efficiently and handle shooting."""
     global monsters_list
@@ -986,7 +1065,7 @@ async def track_server_fps():
             if now - last_time >= 1.0:
                 SERVER_FPS = fps_counter
 
-                print(f"[Server Health] FPS/TPS: {SERVER_FPS} / 60")
+                print(f"[Server Health] FPS/FPS: {SERVER_FPS} / 60")
                 fps_counter = 0
                 last_time = now
 
@@ -1028,6 +1107,7 @@ async def main():
 if __name__ == "__main__":
     spawn_loot_per_camera_zone(state.game_map)
     spawn_random_monsters(MONSTERS_AMOUNT)
+    spawn_potions_per_camera_zone(state.game_map)
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
