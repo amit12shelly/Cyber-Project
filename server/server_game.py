@@ -187,9 +187,12 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                     return
                 angle = float(parts[2])
 
+                center_x = float(x_str) + 32
+                center_y = float(y_str) + 32
+
                 state.active_bullets[new_id] = {
-                    "x": float(x_str),
-                    "y": float(y_str),
+                    "x": center_x+28,
+                    "y": center_y-8,
                     "angle": angle,
                 }
 
@@ -275,11 +278,6 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             else:  # this weapon does not exist
                 self.disconnect()  # kick the player
                 print("player has been kicked! weapon id = none")
-
-
-
-
-
 
 
         elif data_str.startswith("DROP|"):
