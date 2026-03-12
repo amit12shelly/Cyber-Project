@@ -526,12 +526,12 @@ def main():
     floor_img = pygame.image.load("img/DesertTile.png").convert()
     wall_img = pygame.image.load("img/watertile.png").convert()
 
-    bullet_img = pygame.image.load("img/bullet.png").convert()
+    bullet_img = pygame.image.load("img/bullet.png").convert_alpha()
 
 
     floor_img = pygame.transform.scale(floor_img, (tile_size, tile_size))
     wall_img = pygame.transform.scale(wall_img, (tile_size, tile_size))
-    bullet_img = pygame.transform.scale(bullet_img, (10.7 ,5.4))
+    bullet_img = pygame.transform.scale(bullet_img, (21, 11))
     game_map = load_map("map.txt")
 
     player = Player(128, 128)
