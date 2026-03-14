@@ -30,7 +30,7 @@ WEAPON_RANGE = [w[2] for w in WEAPON_LIST]
 MONSTER_CHANGE_PATH_EVERY_SET_SECONDS = 3
 MONSTER_ACCURACY = 65  # 1-100
 MAX_POTION = 9000
-POTION_LIST = [["potion", 40]] #-> name,hp++
+POTION_LIST = [["Potion", 40],["Poison",5]] #-> name,hp++
 counter = count()
 monsters_list = []
 SERVER_FPS = 0
@@ -257,7 +257,8 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             if len(parts) < 3:
                 return
             pickup_pos = parts[1]
-            pickup_hp = parts[2]
+            pickup_type = parts[2]
+            print(pickup_type)
             try:
                 px = float(pickup_pos.split(",")[0])
                 py = float(pickup_pos.split(",")[1])
@@ -268,15 +269,17 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
             for p_id, p_data in state.map_potion.items():  # checks if this POTION IS  real
                     if abs(p_data["x"] - px) <= TOLERANCE and abs(p_data["y"] - py) <= TOLERANCE:
-                        print("sup dog up the hp")
-                        client_id = self._quic.host_cid.hex()
-                        state.players_potions[client_id] += 1
-                        # state.players_hp[client_id] = pickup_hp
-                        found_potion_id = p_id
-                        break
+                        print(p_data["type"])
+                        if p_data["type"] == pickup_type:
+                            print("sup dog up the hp")
+                            client_id = self._quic.host_cid.hex()
+                            state.players_potions[client_id] += 1
+                            # state.players_hp[client_id] = pickup_hp
+                            found_potion_id = p_id
+                            break
             if found_potion_id is not None:  # if its real
                 pos_str = f"{state.map_potion[found_potion_id]['x']},{state.map_potion[found_potion_id]['y']}"
-                self.broadcast_undrop(pos_str, "potion")
+                self.broadcast_undrop(pos_str,pickup_type)
                 self.broadcast_player(client_id, state.players_pos[client_id], state.players_hp[client_id],False)
                 del state.map_potion[found_potion_id]
             else:  # this weapon does not exist
@@ -611,6 +614,9 @@ class Monster:
     def take_damage(self, damage):
         self.hp -= damage
         if self.hp <= 0:
+            death_x = self.x
+            death_y = self.y
+
             tiles_high = len(state.game_map)
             tiles_wide = len(state.game_map[0])
             tile_x = random.randint(0, tiles_wide - 1)
@@ -641,6 +647,20 @@ class Monster:
             self.last_path_time = time.time()
             self.last_shot_time = time.time()
 
+            #drop 2 items when monster die
+            for i in range(1):
+                item = random.choice(POTION_LIST)
+                new_id = random.randint(1, int(MAX_POTION))
+                while new_id in state.map_potion:
+                    new_id = random.randint(1, int(MAX_POTION))
+                state.map_potion[new_id] = {"x": death_x,"y": death_y,"type": item[0]}
+
+                for client in list(state.active_clients):
+                    if client.stream_id is not None:
+                        item_type = item[0]
+                        msg = f"ITEMS|{death_x},{death_y}|{item_type}\n".encode()
+                        client._quic.send_stream_data(client.stream_id, msg, end_stream=False)
+                        client.transmit()
 
 async def monster_gun_tracking(bullet_id: int, gun_type: str, start_x: float, start_y: float, angle: float):
     if bullet_id not in state.active_bullets:
@@ -959,10 +979,12 @@ def spawn_potions_per_camera_zone(game_map, per_zone=2):
                     while new_id in state.map_potion:
                         new_id = random.randint(1, int(MAX_POTION))
 
+                    item = POTION_LIST[0]
                     # הכנס למפה
                     state.map_potion[new_id] = {
                         "x": x,
-                        "y": y
+                        "y": y,
+                        "type":item[0]
                     }
 
                     spawned += 1
