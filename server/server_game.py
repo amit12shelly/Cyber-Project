@@ -12,11 +12,12 @@ from aioquic.quic.events import StreamDataReceived, QuicEvent, ConnectionTermina
 
 #----------server settings----------
 INVENTORY_SIZE = 5
+UP_HP = 40
 MAX_BULLETS = 1000
 TILE_SIZE = 64
 TOLERANCE = 70
 BULLETS_MOVE_TIME = 0.01
-MONSTERS_AMOUNT = 2000
+MONSTERS_AMOUNT = 3500
 SCREEN_WIDTH = 1920
 SCREEN_HEIGHT = 1080
 MAX_WEAPONS = 9000
@@ -47,6 +48,7 @@ class GameState:
     players_inventory = {}  # client_id -> {slot 1, slot 2, slot 3 ,slot 4 ,slot 5}
     active_clients = set()  # set of EchoQuicProtocol
     active_bullets = {}  # bullet_id -> {x, y, angle}
+    players_potions ={}
 
     #game info
     map_weapons = {}  # weapon_id -> {x, y, type}
@@ -104,6 +106,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 state.players_hp[client_id] = parts[2]
 
             state.players_inventory[client_id] = {int(i): "none" for i in range(INVENTORY_SIZE)}
+            state.players_potions[client_id] = 0
 
             id_msg = f"SETID|{client_id}\n".encode()
             if self.stream_id is not None:
@@ -263,21 +266,49 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 return
             found_potion_id = None
 
-            for p_id, p_data in state.map_potion.items():  # checks if this weapon in real
+            for p_id, p_data in state.map_potion.items():  # checks if this POTION IS  real
                     if abs(p_data["x"] - px) <= TOLERANCE and abs(p_data["y"] - py) <= TOLERANCE:
                         print("sup dog up the hp")
                         client_id = self._quic.host_cid.hex()
-                        state.players_hp[client_id] = pickup_hp
+                        state.players_potions[client_id] += 1
+                        # state.players_hp[client_id] = pickup_hp
                         found_potion_id = p_id
                         break
             if found_potion_id is not None:  # if its real
                 pos_str = f"{state.map_potion[found_potion_id]['x']},{state.map_potion[found_potion_id]['y']}"
                 self.broadcast_undrop(pos_str, "potion")
-                self.broadcast_player(client_id, state.players_pos[client_id], state.players_hp[client_id])
+                self.broadcast_player(client_id, state.players_pos[client_id], state.players_hp[client_id],False)
                 del state.map_potion[found_potion_id]
             else:  # this weapon does not exist
                 self.disconnect()  # kick the player
                 print("player has been kicked! weapon id = none")
+
+        elif data_str.startswith("USE|"):
+            try:
+                parts = data_str.split("|")
+            except:
+                print("Error while splitting the USE command!")
+                return
+            if len(parts) < 2:
+                return
+
+            item_name = parts[1]
+            client_id = self._quic.host_cid.hex()
+
+            if client_id not in state.players_hp:
+                return
+            if state.players_potions[client_id] <= 0:
+                return
+            if item_name =="Potion":
+                print("NIgga")
+                state.players_hp[client_id] += UP_HP
+
+                if state.players_hp[client_id] > 100:
+                    state.players_hp[client_id] = 100
+                self.broadcast_player(client_id,state.players_pos[client_id],state.players_hp[client_id],True)
+            else:  # this weapon does not exist
+                self.disconnect()  # kick the player
+                print("player has been kicked! item name = none")
 
 
         elif data_str.startswith("DROP|"):
@@ -432,6 +463,8 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             del state.players_hp[client_id]
         if client_id in state.players_inventory:
             del state.players_inventory[client_id]
+        if client_id in state.players_potions:
+            del state.players_potions[client_id]
         if self in state.active_clients:
             state.active_clients.remove(self)
 

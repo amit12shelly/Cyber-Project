@@ -215,6 +215,7 @@ class Potion:
         self.x = x
         self.y = y
         self.size = 64
+        self.name = "Potion"
 
     def draw(self, screen, camera_x, camera_y):
         draw_x = self.x - camera_x
@@ -558,6 +559,7 @@ def main():
     # loot_items = spawn_loot_per_camera_zone(game_map, tile_size, loot_pool, screen.get_width(), screen.get_height(),per_zone=1)
     loot_items = []
     monsters=[]
+    inventory = []
     hp_items = []
     # print("Loot spawned:", len(loot_items))
     # print("First loot at:", loot_items[0].x, loot_items[0].y)
@@ -603,10 +605,20 @@ def main():
                         player.pick_item(nearby_loot)  # מוסיף ל־Inventory
                         loot_items.remove(nearby_loot)
                         outgoing_messages.put(f"PICKUP|{nearby_loot.x},{nearby_loot.y}|{nearby_loot.name}")
-                    elif nearby_potion and player.hp < 100:
-                        player.hp += UP_HP
+                    elif nearby_potion:
+                        # player.hp += UP_HP
                         hp_items.remove(nearby_potion)
+                        inventory.append(nearby_potion)
                         outgoing_messages.put(f"PPICKUP|{nearby_potion.x},{nearby_potion.y}|{player.hp}")
+                        print("Picked potion")
+
+                if event.key == pygame.K_x:
+                    if len(inventory) > 0 and player.hp < 100:
+                        item = inventory.pop(0)# take the first on the inventory
+                        player.hp += UP_HP
+                        if player.hp > 100:
+                            player.hp = 100
+                        outgoing_messages.put(f"USE|{item.name}")
 
                 if event.key == pygame.K_q:
                     slot_to_drop = player.selected_slot
