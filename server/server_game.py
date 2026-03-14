@@ -6,6 +6,8 @@ import heapq
 import time
 
 from itertools import count
+
+import pygame
 from aioquic.asyncio import QuicConnectionProtocol, serve
 from aioquic.quic.configuration import QuicConfiguration
 from aioquic.quic.events import StreamDataReceived, QuicEvent, ConnectionTerminated
@@ -33,7 +35,7 @@ POTION_LIST = [["potion", 40]] #-> name,hp++
 counter = count()
 monsters_list = []
 SERVER_FPS = 0
-
+SKILL_COOL_TIME = 10
 def load_map():
     with open("map.txt", "r") as f:
         lines = f.readlines()
@@ -47,7 +49,7 @@ class GameState:
     players_inventory = {}  # client_id -> {slot 1, slot 2, slot 3 ,slot 4 ,slot 5}
     active_clients = set()  # set of EchoQuicProtocol
     active_bullets = {}  # bullet_id -> {x, y, angle}
-
+    players_skills = {}  #client_id -> {skill name, is active, last activation time}
     #game info
     map_weapons = {}  # weapon_id -> {x, y, type}
     game_map = load_map()
@@ -96,12 +98,31 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 print("Error while splitting Connected command!")
                 return
 
+            # skills_dict = {
+            #     "Speed Boost": Skill("Speed Boost", 5, 5, 0, False),
+            #     "Shield": Skill("Shield", 5, 5, 0, False)
+            # }
+            # try:
+            #     selected_skill = skills_dict[parts[3]]
+            # except:
+            #     print("Skill not selected")
+            #     self.disconnect()
+            #     return
+            #
+            selected_skill = Skill("Speed Boost", 5, 0, False)
+            state.players_skills[client_id] = selected_skill
             if len(parts) < 3:
+
                 state.players_pos[client_id] = "0,0"
                 state.players_hp[client_id] = "100"
             else:
                 state.players_pos[client_id] = parts[1]
                 state.players_hp[client_id] = parts[2]
+
+
+
+
+
 
             state.players_inventory[client_id] = {int(i): "none" for i in range(INVENTORY_SIZE)}
 
@@ -155,7 +176,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                     print("player has been kicked! player collision")
                     return
 
-            if check_movement(new_pos, state.players_pos[self._quic.host_cid.hex()]):
+            if check_movement(new_pos, state.players_pos[self._quic.host_cid.hex()], state.players_skills[self._quic.host_cid.hex()]):
                 state.players_pos[self._quic.host_cid.hex()] = new_pos
                 self.broadcast_player(self._quic.host_cid.hex(), new_pos, state.players_hp[self._quic.host_cid.hex()],
                                       False)
@@ -344,6 +365,34 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             client_id = self._quic.host_cid.hex()
             self.broadcast_chat(msg , client_id)
 
+        elif data_str.startswith("SKILL|"):
+            try:
+                parts = data_str.split("|")
+            except:
+                print("Error while splitting the CHAT command!")
+                return
+            if len(parts) < 3:
+                return
+            skills_dict = {
+                "Speed Boost": Skill("Speed Boost", 5, 0,  False),
+                "Shield": Skill("Shield", 5, 0,  False)
+            }
+            try:
+                sent_skill = skills_dict[parts[1]]
+            except:
+                self.disconnect()
+                return
+            click_time = float(parts[2])
+
+            if click_time - state.players_skills[client_id].last_action_time >= SKILL_COOL_TIME:
+                state.players_skills[client_id] = sent_skill
+                state.players_skills[client_id].last_action_time = click_time
+                state.players_skills[client_id].is_active = True
+                print("Skill Activated!")
+                asyncio.create_task(state.players_skills[client_id].timer(client_id, self.broadcast_skill))
+                self.broadcast_skill(client_id, state.players_skills[client_id].name, True,False)
+            else:
+                print("Skill issue!")
 
         # DISCONNECT
         elif data_str == "Disconnected":
@@ -420,6 +469,16 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             client.transmit()
         print("changed! -", msg)
 
+
+    def broadcast_skill(self, sender_id: str, skill: str, is_active: bool, to_yourself: bool):
+        msg = f"SKILL|{sender_id}|{skill}|{is_active}\n".encode()
+        for client in list(state.active_clients):
+            if client == self and not to_yourself:
+                continue
+            if client.stream_id is None:
+                continue
+            client._quic.send_stream_data(client.stream_id, msg, end_stream=False)
+            client.transmit()
     # ---------- Game logic ---------- #
 
     def disconnect(self):
@@ -432,6 +491,8 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             del state.players_hp[client_id]
         if client_id in state.players_inventory:
             del state.players_inventory[client_id]
+        if client_id in state.players_skills:
+            del state.players_skills[client_id]
         if self in state.active_clients:
             state.active_clients.remove(self)
 
@@ -504,6 +565,10 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
     def damage(self, client_id: str, damage: int):
         hp = int(state.players_hp.get(client_id))
+        # if state.players_skills[client_id]
+        if state.players_skills[client_id].name == 'Shield' and state.players_skills[client_id].is_active:
+            print("shield protection")
+            return
         if hp - damage <= 0:
             pos = state.players_pos[client_id]
             dropped = 0
@@ -556,6 +621,22 @@ class Node:
   def __init__(self, data):
     self.data = data
     self.next = None
+
+class Skill:
+    def __init__(self, name, duration_time, last_action_time, is_active):
+        self.name = name
+        self.duration_time = duration_time
+        self.last_action_time = last_action_time
+        self.is_active = is_active
+
+    async def timer(self, client_id, broadcast_skill):
+        # Wait for the duration (this doesn't block the rest of the code)
+        await asyncio.sleep(self.duration_time)
+        broadcast_skill(client_id, self.name, False, False)
+        # After waiting, turn it off
+        self.is_active = False
+
+        print(f"{self.name} duration finished!")
 
 
 class Monster:
@@ -817,19 +898,24 @@ def get_next_bullet_position(x, y, angle_degrees):
     return x + math.cos(angle_rad)*15 , y + math.sin(angle_rad)*15
 
 
-def check_movement(new_pos, old_pos):
+def check_movement(new_pos, old_pos, skill):
+
     try:
         new_x, new_y = map(float, new_pos.split(","))
         old_x, old_y = map(float, old_pos.split(","))
     except:
         print("Error while splitting the in the check_movement function!")
         return
+    print(skill.is_active)
     if check_if_in_map(new_x, new_y):
         if state.game_map[int(new_y / TILE_SIZE)][int(new_x / TILE_SIZE)] == ".":
-            if abs(new_x - old_x) <= 8 and abs(new_y - old_y) <= 8:
+            current_time = pygame.time.get_ticks() / 1000  # Get time in seconds
+            if (abs(new_x - old_x) <= 6 and abs(new_y - old_y) <= 6) or (skill.name == "Speed Boost" and current_time - skill.last_action_time + skill.duration_time <= 1):
                 return True
-
+            elif abs(new_x - old_x) <= 16 and abs(new_y - old_y) <= 16 and skill.name == "Speed Boost" and skill.is_active:
+                return True
     return False
+
 
 
 def spawn_random_monsters(amount):
