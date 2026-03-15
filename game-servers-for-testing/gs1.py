@@ -39,7 +39,7 @@ SERVER_FPS = 0
 LB_PORT = 8080
 
 MY_IP = gs_and_lb_helper_functions.get_local_ip()
-MY_PORT = 4433
+MY_PORT = 4434
 
 def load_map():
     with open("map.txt", "r") as f:

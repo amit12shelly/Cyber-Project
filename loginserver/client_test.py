@@ -70,7 +70,9 @@ def login_client():
                             "x": int(parts[3]),
                             "y": int(parts[4]),
                             "hp": int(parts[5]),
-                            "inventory": parts[6]
+                            "inventory": parts[6],
+                            "gs_ip": parts[7],
+                            "gs_port": int(parts[8])
                         }
                         login_done = True
 

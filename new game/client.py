@@ -11,8 +11,6 @@ from aioquic.asyncio import connect
 from aioquic.quic.configuration import QuicConfiguration
 from loginserver.client_test import login_client
 
-SERVER_IP = "127.0.0.1"
-SERVER_PORT = 4433
 TOLERANCE = 5
 UP_HP = 40
 MY_ID = ""
@@ -31,40 +29,17 @@ CHAT_Y_BOTTOM_OFFSET = 120
 BULLETS = []
 
 
-def send_disconnect_and_quit(player, wait_seconds=0.08):
-    """
-    שולח הודעת ניתוק הכוללת מיקום ו־hp, ממתין מעט כדי לתת
-    ל־network thread לשלוח זאת ואז סוגר את pygame ויוצא.
-    """
-    try:
-        # המרה לסוגים פשוטים כדי שהשרת יבין
-        x = int(player.x)
-        y = int(player.y)
-        hp = int(player.hp)
-    except Exception:
-        # אם אין שחקן או לא הצלחנו, שלח לפחות הודעת ניתוק רגילה
-        outgoing_messages.put("Disconnected")
-    else:
-        # תבנית הודעה — תתאם לפי מה שהשרת מצפה לקבל
-        outgoing_messages.put(f"Disconnected|{x},{y}|{hp}")
-
-    # תעצור מעט (לא יותר מדי) כדי לתת ל־network thread לטפל בהודעה
-    # 80ms בדרך כלל מספיק; אם יש לך בעיות - הגדל עד 0.2
-    time.sleep(wait_seconds)
-
-    pygame.quit()
-    sys.exit()
-
-async def quic_network_loop():
+async def quic_network_loop(host, port):
     config = QuicConfiguration(
         is_client=True,
         alpn_protocols=["echo-protocol"],
         verify_mode=False
     )
 
-    async with connect(SERVER_IP, SERVER_PORT, configuration=config) as client:
+    async with connect(host, port, configuration=config) as client:
         stream_reader, stream_writer = await client.create_stream()
-        print("Connected to server!")
+        print(f"Connected to Game Server at {host}:{port}!")
+
         async def read_from_server():
             buffer = ""
             while True:
@@ -92,17 +67,18 @@ async def quic_network_loop():
 
         await asyncio.gather(read_from_server(), write_to_server())
 
-def start_quic_thread():
+def start_quic_thread(ip, port):
     loop = asyncio.new_event_loop()
 
-    def runner():
+    def runner(target_ip, target_port):
         try:
             asyncio.set_event_loop(loop)
-            loop.run_until_complete(quic_network_loop())
+            loop.run_until_complete(quic_network_loop(target_ip, target_port))
         except Exception as e:
             print("NETWORK THREAD ERROR:", e)
 
-    threading.Thread(target=runner, daemon=True).start()
+    threading.Thread(target=runner, args=(ip, port), daemon=True).start()
+
 # ---------------- MAP FUNCTIONS ---------------- #
 def load_map(filename):
     with open(filename, "r") as f:
@@ -546,6 +522,9 @@ def main():
     player_data = login_client()
 
     if player_data != None:
+        gs_ip = player_data["gs_ip"]
+        gs_port = player_data["gs_port"]
+
         global MY_ID
         MY_ID = player_data.get("id", "")
 
@@ -574,7 +553,7 @@ def main():
         chat_open = False
         chat_input = ""
         chat_messages = []
-        start_quic_thread()
+        start_quic_thread(gs_ip, gs_port)
         outgoing_messages.put(f"Connected|{player.x},{player.y}|{player.hp}")
         outgoing_messages.put(f"UPDATE|{player.x},{player.y}")
 
@@ -603,7 +582,8 @@ def main():
         while running:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
-                    send_disconnect_and_quit(player)
+                    outgoing_messages.put(f"Disconnected")
+                    running = False
 
                 if event.type == pygame.KEYDOWN:
                     if chat_open:
@@ -729,10 +709,13 @@ def main():
                     if player_id in remote_players:
                         del remote_players[player_id]
                         if player_id == MY_ID:
-                            send_disconnect_and_quit(player)
+                            pygame.quit();
+                            exit()
+
                     else:
                         if player_id == MY_ID:
-                            send_disconnect_and_quit(player)
+                            pygame.quit();
+                            exit()
 
                 elif parts[0] == "SHOW-BULLET":
                     if len(parts) < 4:
@@ -864,9 +847,6 @@ def main():
             draw_inventory(screen, player)
             draw_chat(screen, chat_font, chat_messages, chat_open, chat_input)
             pygame.display.flip()
-
-
-
 
             clock.tick(60)
 

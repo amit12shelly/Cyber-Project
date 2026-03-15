@@ -3,8 +3,33 @@ import ssl
 import database
 
 
-IP = "127.0.0.1"
+IP = "0.0.0.0"
 PORT = 8820
+
+LB_IP = "127.0.0.1"
+LB_PORT = 8080
+
+
+async def get_best_gs_from_lb(x, y):
+    try:
+        reader, writer = await asyncio.open_connection(LB_IP, LB_PORT)
+
+        query = f"GetServer|{x}|{y}\n"
+        writer.write(query.encode())
+        await writer.drain()
+
+        line = await reader.readline()
+        writer.close()
+        await writer.wait_closed()
+
+        msg = line.decode().strip()
+        if msg.startswith("BestServer|"):
+            _, gs_ip, gs_port = msg.split("|")
+            return gs_ip, gs_port
+        return None, None
+    except Exception as e:
+        print(f"[!] Error querying LB: {e}")
+        return None, None
 
 
 def get_ssl_context():
@@ -20,6 +45,7 @@ def get_ssl_context():
 async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
     addr = writer.get_extra_info("peername")
     print(f"[*] Secure connection from {addr}")
+    reply = ""
 
     try:
         data = await reader.read(1024)
@@ -47,13 +73,19 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                     player_id = database.login(username, password)
                     if player_id is not None:
                         player_data = database.load_player(player_id)
+                        gs_ip, gs_port = await get_best_gs_from_lb(player_data['x'], player_data['y'])
 
-                        reply = (
-                            f"LOGIN_SUCCESS|{player_data['player_id']}|"
-                            f"{player_data['username']}|{player_data['x']}|"
-                            f"{player_data['y']}|{player_data['hp']}|"
-                            f"{player_data['inventory']}"
-                        )
+                        if gs_ip and gs_port:
+                            reply = (
+                                f"LOGIN_SUCCESS|{player_id}|"
+                                f"{player_data['username']}|{player_data['x']}|"
+                                f"{player_data['y']}|{player_data['hp']}|"
+                                f"{player_data['inventory']}|"
+                                f"{gs_ip}|{gs_port}"
+                            )
+                        else:
+                            reply = "Login Failed: No Game Server available"
+
 
                     else:
                         reply = "Login Failed"
@@ -90,9 +122,7 @@ async def main():
     if not ssl_context:
         return
 
-    server = await asyncio.start_server(
-        handle_client, IP, PORT, ssl=ssl_context
-    )
+    server = await asyncio.start_server(handle_client, IP, PORT, ssl=ssl_context)
 
     print(f"--- Secure Login Server running on {IP}:{PORT} ---")
 

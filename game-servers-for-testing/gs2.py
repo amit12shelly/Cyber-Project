@@ -36,10 +36,10 @@ counter = count()
 monsters_list = []
 SERVER_FPS = 0
 
+LOCAL_IP = gs_and_lb_helper_functions.get_local_ip()
+SERVER_IP = "0.0.0.0"
+SERVER_PORT = 4434
 LB_PORT = 8080
-
-MY_IP = gs_and_lb_helper_functions.get_local_ip()
-MY_PORT = 4433
 
 def load_map():
     with open("map.txt", "r") as f:
@@ -48,29 +48,24 @@ def load_map():
 
 
 class GameState:
-    def __init__(self):
-        # ----- Load balancer info -----
-        self.lb_host = None
-        self.lb_port = LB_PORT
-        self.lb_writer = None
+    #player info
+    x_min = 0
+    x_max = 0
 
-        self.server_id = None
-        self.server_area = None
+    players_pos = {}  # client_id -> "x,y"
+    players_hp = {}  # client_id -> hp
+    players_inventory = {}  # client_id -> {slot 1, slot 2, slot 3 ,slot 4 ,slot 5}
+    active_clients = set()  # set of EchoQuicProtocol
+    active_bullets = {}  # bullet_id -> {x, y, angle}
 
-        # ----- players info -----
-        self.players_pos = {}          # client_id -> "x,y"
-        self.players_hp = {}           # client_id -> hp
-        self.players_inventory = {}    # client_id -> {slot1..slot5}
-        self.active_clients = set()    # set of EchoQuicProtocol
-        self.active_bullets = {}       # bullet_id -> {x, y, angle}
+    #game info
+    map_weapons = {}  # weapon_id -> {x, y, type}
+    game_map = load_map()
 
-        # ----- game info -----
-        self.map_weapons = {}          # weapon_id -> {x, y, type}
-        self.game_map = load_map()
+    #monsters info
+    monsters = {}  #monster_id -> {x, y, hp, path(A*), last_path_time(last time called A* for this monster)}
+    map_potion = {}
 
-        # ----- monsters info -----
-        self.monsters = {}             # monster_id -> {x, y, hp, path, last_path_time}
-        self.map_potion = {}
 
 state = GameState()
 
@@ -273,7 +268,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             try:
                 px = float(pickup_pos.split(",")[0])
                 py = float(pickup_pos.split(",")[1])
-            except (ValueError, IndexError):
+            except:
                 print("Error while splitting the pos in the PICKUP command!")
                 return
             found_potion_id = None
@@ -1055,8 +1050,8 @@ def broadcast_visible_monsters():
         msg = f"MONSTERS{client_monster_msg}\n".encode()
         client._quic.send_stream_data(client.stream_id, msg, end_stream=False)
         client.transmit()
-
 # ---------- Server entry ---------- #
+
 async def check_cpu():
     while True:
         print("CPU:", psutil.cpu_percent(interval=1.0))
@@ -1094,21 +1089,38 @@ def broadcast_fps():
         client._quic.send_stream_data(client.stream_id, msg, end_stream=False)
         client.transmit()
 
+async def send_heartbeats_to_lb(writer):
+    while not writer.is_closing():
+        try:
+            if state.server_id is not None:
+                # פורמט: Server heartbeat|SERVER_ID|CPU
+                hb_msg = f"Server heartbeat|{state.server_id}|{psutil.cpu_percent()}\n"
+                writer.write(hb_msg.encode())
+                await writer.drain()
+            await asyncio.sleep(10)
+        except:
+            break
+
 
 async def connect_to_lb():
+    """מנהל את הקשר מול ה-Load Balancer"""
     while True:
         try:
+            # שימוש בכתובת שהוזנה ב-main
             print(f"[*] Attempting to connect to LB at {state.lb_host}:{state.lb_port}...")
-
             reader, writer = await asyncio.open_connection(state.lb_host, state.lb_port)
             state.lb_writer = writer
 
-            connect_msg = f"Server connect|{MY_IP}|{psutil.cpu_percent()}|{MY_PORT}\n"
+            # 1. הזדהות ראשונית לפי הפרוטוקול של ה-LB
+            # פורמט: Server connect|IP|CPU|PORT
+            connect_msg = f"Server connect|{LOCAL_IP}|{psutil.cpu_percent()}|{SERVER_PORT}\n"
             writer.write(connect_msg.encode())
             await writer.drain()
 
+            # הפעלת ה-heartbeat ברקע (מוודא שהשרת לא יימחק מהרשימה)
             asyncio.create_task(send_heartbeats_to_lb(writer))
 
+            # 2. האזנה לפקודות מה-LB
             while True:
                 line = await reader.readline()
                 if not line:
@@ -1116,28 +1128,24 @@ async def connect_to_lb():
 
                 msg = line.decode().strip()
 
-
+                # קבלת מזהה מה-LB
                 if msg.startswith("Connected|"):
                     state.server_id = int(msg.split("|")[1])
                     print(f"[LB] Assigned ID: {state.server_id}")
 
-
+                # עדכון רצועת ה-X של השרת
                 elif msg.startswith("UpdateArea|"):
                     area_data = json.loads(msg.split("|")[1])
                     state.server_area = area_data
-
                     print(
-                        f"[LB] Area Updated (X-Range): "
-                        f"{state.server_area['t-l'][0]} to {state.server_area['b-r'][0]}"
-                    )
+                        f"[LB] Area Updated (X-Range): {state.server_area['t-l'][0]} to {state.server_area['b-r'][0]}")
 
+                # פקודת מעבר שחקן (Handover)
                 elif msg.startswith("TransferClient|"):
                     _, c_id, n_ip, n_port = msg.split("|")
-
                     for client in list(state.active_clients):
                         if client._quic.host_cid.hex() == c_id:
                             print(f"[LB] Sending SWITCH to client {c_id} -> {n_ip}:{n_port}")
-
                             switch_msg = f"SWITCH|{n_ip}|{n_port}\n".encode()
                             client._quic.send_stream_data(client.stream_id, switch_msg)
                             client.transmit()
@@ -1149,16 +1157,20 @@ async def connect_to_lb():
 
 
 async def register_with_lb_once(lb_ip: str, timeout: float = 5.0) -> bool:
+    """
+    מנסה להתחבר ל-LB פעם אחת, שולח Server connect וממתין לקבל UpdateArea.
+    מחזיר True אם קיבלנו area תקין, אחרת False.
+    """
     try:
         print(f"[*] Trying one-shot registration to LB {lb_ip}:{LB_PORT} ...")
         reader, writer = await asyncio.open_connection(lb_ip, LB_PORT)
 
-        connect_msg = f"Server connect|{MY_IP}|{psutil.cpu_percent()}|{MY_PORT}\n"
+        connect_msg = f"Server connect|{LOCAL_IP}|{psutil.cpu_percent()}|{SERVER_PORT}\n"
         writer.write(connect_msg.encode())
         await writer.drain()
 
+        # חכה לתשובות עד timeout
         end_time = time.time() + timeout
-
         while time.time() < end_time:
             try:
                 remaining = max(0.1, end_time - time.time())
@@ -1170,6 +1182,7 @@ async def register_with_lb_once(lb_ip: str, timeout: float = 5.0) -> bool:
                 break
 
             msg = line.decode().strip()
+            # print("LB reply (one-shot):", msg)
 
             if msg.startswith("Connected|"):
                 try:
@@ -1179,24 +1192,21 @@ async def register_with_lb_once(lb_ip: str, timeout: float = 5.0) -> bool:
                     pass
 
             elif msg.startswith("UpdateArea|"):
+                # UpdateArea|{"t-l":[x1,y1],"b-r":[x2,y2]}
                 try:
                     payload = msg.split("|", 1)[1]
                     area_data = json.loads(payload)
                     state.server_area = area_data
-
                     print(f"[LB] Received initial area: {area_data}")
-
                     writer.close()
                     await writer.wait_closed()
                     return True
-
                 except Exception as e:
                     print("[LB] Failed parsing UpdateArea:", e)
                     break
 
         writer.close()
         await writer.wait_closed()
-
         print("[LB] One-shot registration failed or timed out.")
         return False
 
@@ -1205,21 +1215,10 @@ async def register_with_lb_once(lb_ip: str, timeout: float = 5.0) -> bool:
         return False
 
 
-async def send_heartbeats_to_lb(writer):
-    try:
-        while True:
-            if state.server_id is not None:
-                msg = f"Server heartbeat|{state.server_id}|{psutil.cpu_percent()}\n"
-                writer.write(msg.encode())
-                await writer.drain()
-
-            await asyncio.sleep(5)
-
-    except Exception as e:
-        print("[LB] Heartbeat stopped:", e)
-
-
 async def main():
+    print("\n--- Game Server Startup ---")
+
+    # בקשה חוזרת לקבלת LB IP עד שנקבל UpdateArea תקין
     while True:
         lb_ip = await asyncio.to_thread(input, "Enter Load Balancer IP (default 127.0.0.1): ")
         lb_ip = lb_ip.strip() or "127.0.0.1"
@@ -1233,26 +1232,37 @@ async def main():
         else:
             print("[!] Could not register with LB. Try another IP or check the LB is running.\n")
 
+    # עכשיו נפעיל את ה־connect_to_lb ברקע (הוא ידאג ל-heartbeats ו-reconnect)
+    asyncio.create_task(connect_to_lb())
 
+    # טען תעודות
     config = QuicConfiguration(
         is_client=False,
         alpn_protocols=["echo-protocol"],
         verify_mode=False,
     )
 
-    config.load_cert_chain("cert.pem", "key.pem")
+    try:
+        config.load_cert_chain("cert.pem", "key.pem")
+    except Exception as e:
+        print(f"[!] SSL Certificate Error: {e}")
+        return
 
+    # הפעלת ה־QUIC server (כמשימה רקע) ואז השאר את הלולאה חיה
+    print(f"[*] Starting QUIC server on {SERVER_IP}:{SERVER_PORT}")
     asyncio.create_task(serve(
-        host=MY_IP,
-        port=MY_PORT,
+        host=SERVER_IP,
+        port=SERVER_PORT,
         configuration=config,
         create_protocol=EchoQuicProtocol,
     ))
 
-    asyncio.create_task(connect_to_lb())
+    # משימות רקע נוספות
     asyncio.create_task(check_cpu())
     asyncio.create_task(monsters_manager())
     asyncio.create_task(track_server_fps())
+
+    # עומד כאן עד סגירה ידנית
     await asyncio.Future()
 
 
@@ -1260,7 +1270,8 @@ if __name__ == "__main__":
     spawn_loot_per_camera_zone(state.game_map)
     spawn_random_monsters(MONSTERS_AMOUNT)
     spawn_potions_per_camera_zone(state.game_map)
+
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        pass
+        print("\n[!] Server closed by user.")
