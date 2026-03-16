@@ -1109,7 +1109,7 @@ async def connect_to_lb():
         try:
             print(f"[*] Attempting to connect to LB at {state.lb_host}:{state.lb_port}...")
 
-            reader, writer = await asyncio.open_connection(state.lb_host, state.lb_port)
+            reader, writer = await asyncio.open_connection(state.lb_host, state.lb_port , limit=1024 * 1024 * 10)
             state.lb_writer = writer
 
             connect_msg = f"Server connect|{MY_IP}|{psutil.cpu_percent()}|{MY_PORT}\n"
@@ -1233,7 +1233,7 @@ async def send_to_lb(message: str):
 async def register_with_lb_once(lb_ip: str, timeout: float = 5.0) -> bool:
     try:
         print(f"[*] Trying one-shot registration to LB {lb_ip}:{LB_PORT} ...")
-        reader, writer = await asyncio.open_connection(lb_ip, LB_PORT)
+        reader, writer = await asyncio.open_connection(lb_ip, LB_PORT, limit=1024 * 1024 * 10)
 
         connect_msg = f"Server connect|{MY_IP}|{psutil.cpu_percent()}|{MY_PORT}\n"
         writer.write(connect_msg.encode())
@@ -1260,8 +1260,44 @@ async def register_with_lb_once(lb_ip: str, timeout: float = 5.0) -> bool:
                 except:
                     pass
 
-            elif msg.startswith("UpdateArea|"):
+            elif msg.startswith("UpdateStats|"):
                 try:
+
+                    state.server_area["t-l"][0] = msg.split("|")[1]
+                    state.server_area["t-r"][0] = msg.split("|")[2]
+                    weapons = msg.split("|")[3]
+                    weapons = weapons.split(";")
+                    for weapon in weapons:
+                        x_str = weapon.split(",")[0]
+                        y_str = weapon.split(",")[1]
+                        w_str = weapon.split(",")[2]
+                        new_id = random.randint(1, 1000000)
+                        while new_id in state.map_weapons:
+                            new_id = random.randint(1, 1000000)
+
+                        state.map_weapons[new_id] = {
+                            "x": float(x_str),
+                            "y": float(y_str),
+                            "type": w_str,
+                        }
+                    potions = msg.split("|")[4]
+                    potions = potions.split(";")
+                    for potion in potions:
+                        x_str = potion.split(",")[0]
+                        y_str = potion.split(",")[1]
+                        w_str = potion.split(",")[2]
+
+                        new_id = random.randint(1, 1000000)
+                        while new_id in state.map_potion:
+                            new_id = random.randint(1, 1000000)
+
+                        state.map_potion[new_id] = {
+                            "x": float(x_str),
+                            "y": float(y_str),
+                            "type": w_str,
+                        }
+
+
                     payload = msg.split("|", 1)[1]
                     area_data = json.loads(payload)
                     state.server_area = area_data
