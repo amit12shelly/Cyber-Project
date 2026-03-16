@@ -6,6 +6,8 @@ import heapq
 import time
 import json
 
+import pygame
+
 from server import gs_and_lb_helper_functions
 from itertools import count
 from aioquic.asyncio import QuicConnectionProtocol, serve
@@ -24,10 +26,11 @@ SCREEN_HEIGHT = 1080
 MAX_WEAPONS = 9000
 AMOUNT_TO_DROP_IN_DEATH = 2
 ENTITIES_SPEED = 4
-WEAPON_LIST = [["gun", 20, TILE_SIZE * 10],["rifle" ,10 , TILE_SIZE * 20],["rpg",30,TILE_SIZE*25]] #-> name,damage,range
+WEAPON_LIST = [["gun", 20, TILE_SIZE * 10],["rifle" ,10 , TILE_SIZE * 20],["rpg",30,TILE_SIZE*25], ["knife", 35, 5]] #-> name,damage,range
 WEAPON_NAMES = [w[0] for w in WEAPON_LIST]
 WEAPON_DAMAGE = [w[1] for w in WEAPON_LIST]
 WEAPON_RANGE = [w[2] for w in WEAPON_LIST]
+BOMB_WEAPON = ["bomb", 35, 15]
 MONSTER_CHANGE_PATH_EVERY_SET_SECONDS = 3
 MONSTER_ACCURACY = 65  # 1-100
 MAX_POTION = 9000
@@ -35,6 +38,7 @@ POTION_LIST = [["potion", 40]] #-> name,hp++
 counter = count()
 monsters_list = []
 SERVER_FPS = 0
+SKILL_COOL_TIME = 12
 
 LB_PORT = 8080
 
@@ -68,7 +72,7 @@ class GameState:
         self.players_inventory = {}    # client_id -> {slot1..slot5}
         self.active_clients = set()    # set of EchoQuicProtocol
         self.active_bullets = {}       # bullet_id -> {x, y, angle}
-
+        self.players_skills = {}
         # ----- game info -----
         self.map_weapons = {}          # weapon_id -> {x, y, type}
         self.game_map = load_map()
@@ -125,6 +129,9 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 print("Error while splitting Connected command!")
                 return
 
+            current_skill = Skill("Speed Boost", 5, 0, False)
+
+            state.players_skills[client_id] = current_skill
             if len(parts) < 3:
                 state.players_pos[client_id] = "0,0"
                 state.players_hp[client_id] = "100"
@@ -175,10 +182,15 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 # 1. אימות בסיסי - האם השחקן קיים והתנועה חוקית?
                 if client_id not in state.players_pos: return
 
-                if not check_movement(new_pos, state.players_pos[client_id]):
-                    print(f"[!] {client_id} kicked: Movement violation")
-                    self.disconnect()
-                    return
+                if check_movement(new_pos, state.players_pos[self._quic.host_cid.hex()],
+                                  state.players_skills[self._quic.host_cid.hex()]):
+                    state.players_pos[self._quic.host_cid.hex()] = new_pos
+                    self.broadcast_player(self._quic.host_cid.hex(), new_pos,
+                                          state.players_hp[self._quic.host_cid.hex()],
+                                          False)
+                else:
+                    self.disconnect()  # kick the player
+                    print("player has been kicked! movement problem")
 
                 # 2. עדכון המיקום בשרת המקומי (אחרי שווידאנו שהתנועה חוקית)
                 state.players_pos[client_id] = new_pos
@@ -241,9 +253,18 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 return
             if len(parts) < 3:
                 return
-            weapon_slot = parts[1]
-            weapon = state.players_inventory[client_id][int(weapon_slot)]
-            if weapon in WEAPON_NAMES:
+
+            can_use_bombs = False
+
+            if state.players_skills[client_id].name == "Bombs" and state.players_skills[client_id].is_active == True:
+                weapon = "bomb"
+                can_use_bombs = True
+                print("bomb throw")
+            else:
+                weapon_slot = parts[1]
+                weapon = state.players_inventory[client_id][int(weapon_slot)]
+
+            if weapon in WEAPON_NAMES or can_use_bombs:
                 new_id = random.randint(1, MAX_BULLETS)
                 while new_id in state.active_bullets:
                     new_id = random.randint(1, MAX_BULLETS)
@@ -413,6 +434,33 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             client_id = self._quic.host_cid.hex()
             self.broadcast_chat(msg , client_id)
 
+        elif data_str.startswith("SKILL|"):
+            try:
+                parts = data_str.split("|")
+            except:
+                print("Error while splitting the SKILL command!")
+                return
+            if len(parts) < 3:
+                return
+
+            try:
+                sent_skill = skills_dict[parts[1]]
+            except:
+                self.disconnect()
+                return
+            click_time = float(parts[2])
+            elapsed_since_last_press = click_time - state.players_skills[client_id].last_action_time
+            required_time = state.players_skills[client_id].duration_time + SKILL_COOL_TIME
+
+            if elapsed_since_last_press >= required_time:
+                state.players_skills[client_id] = sent_skill
+                state.players_skills[client_id].last_action_time = click_time
+                state.players_skills[client_id].is_active = True
+                print("Skill Activated!")
+                self.broadcast_skill(client_id, state.players_skills[client_id],False)
+                asyncio.create_task(state.players_skills[client_id].timer(client_id, self.broadcast_skill))
+            else:
+                print("Skill issue!")
 
         # DISCONNECT
         elif data_str == "Disconnected":
@@ -453,8 +501,8 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             client._quic.send_stream_data(client.stream_id, msg, end_stream=False)
             client.transmit()
 
-    def broadcast_show_bullet(self, pos: str ,angle: str, bullet_id: str):
-        msg = f"SHOW-BULLET|{pos}|{angle}|{bullet_id}\n".encode()
+    def broadcast_show_bullet(self, pos: str, angle: str, bullet_id: str, bullet_type: str):
+        msg = f"SHOW-BULLET|{pos}|{angle}|{bullet_id}|{bullet_type}\n".encode()
         for client in list(state.active_clients):
             if client.stream_id is None:
                 continue
@@ -500,18 +548,29 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                     except:
                         continue
 
+    def broadcast_skill(self, sender_id: str, skill, to_yourself: bool):
+        msg = f"SKILL|{sender_id}|{skill.name}|{skill.is_active}\n".encode()
+        for client in list(state.active_clients):
+            if client == self and not to_yourself:
+                continue
+            if client.stream_id is None:
+                continue
+            client._quic.send_stream_data(client.stream_id, msg, end_stream=False)
+            client.transmit()
+
     # ---------- Game logic ---------- #
 
     def disconnect(self):
         client_id = self._quic.host_cid.hex()
         self.broadcast_remove(client_id)
-
         if client_id in state.players_pos:
             del state.players_pos[client_id]
         if client_id in state.players_hp:
             del state.players_hp[client_id]
         if client_id in state.players_inventory:
             del state.players_inventory[client_id]
+        if client_id in state.players_skills:
+            del state.players_skills[client_id]
         if self in state.active_clients:
             state.active_clients.remove(self)
 
@@ -526,14 +585,19 @@ class EchoQuicProtocol(QuicConnectionProtocol):
         angle = state.active_bullets[bullet_id]["angle"]
         gun_range = 0
         gun_damage = 0
-        for i in range(len(WEAPON_NAMES)):
-            if WEAPON_NAMES[i] == gun_type:
-                gun_damage = int(WEAPON_DAMAGE[i])
-                gun_range = int(WEAPON_RANGE[i])
+        if gun_type == "bomb":
+            gun_damage = BOMB_WEAPON[1]
+            gun_range = BOMB_WEAPON[2]
+        else:
+            for i in range(len(WEAPON_NAMES)):
+                if WEAPON_NAMES[i] == gun_type:
+                    gun_damage = int(WEAPON_DAMAGE[i])
+                    gun_range = int(WEAPON_RANGE[i])
+                    break
         pos = f"{x},{y}"
-        self.broadcast_show_bullet(pos , angle , str(bullet_id))
+        self.broadcast_show_bullet(pos, angle, str(bullet_id), "bomb" if gun_type == "bomb" else "bullet")
         for _ in range(gun_range):
-            x, y = get_next_bullet_position(x, y, angle)
+            x, y = get_next_bullet_position(x, y, angle, (15 if gun_type == "bullet" else 8))
             state.active_bullets[bullet_id]["x"] = x
             state.active_bullets[bullet_id]["y"] = y
 
@@ -584,6 +648,9 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
     def damage(self, client_id: str, damage: int):
         hp = int(state.players_hp.get(client_id))
+        if state.players_skills[client_id].name == 'Shield' and state.players_skills[client_id].is_active:
+            print("shield protection")
+            return
         if hp - damage <= 0:
             pos = state.players_pos[client_id]
             dropped = 0
@@ -617,6 +684,8 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 del state.players_hp[client_id]
             if client_id in state.players_inventory:
                 del state.players_inventory[client_id]
+            if client_id in state.players_skills:
+                del state.players_skills[client_id]
             client_to_remove = None
             for client in state.active_clients:
                 if client._quic.host_cid.hex() == client_id:
@@ -628,7 +697,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             print("player killed!")
         else:
             state.players_hp[client_id] = hp - damage
-            self.broadcast_player(client_id, state.players_pos[client_id], state.players_hp[client_id], True)
+            self.broadcast_player(client_id, state.players_pos[client_id], state.players_hp[client_id], False)
 
 
 # ---------- Utils ---------- #
@@ -636,6 +705,23 @@ class Node:
   def __init__(self, data):
     self.data = data
     self.next = None
+
+class Skill:
+    def __init__(self, name, duration_time, last_action_time, is_active):
+        self.name = name
+        self.duration_time = duration_time
+        self.last_action_time = last_action_time
+        self.is_active = is_active
+
+    async def timer(self, client_id, broadcast_skill):
+        # Wait for the duration (this doesn't block the rest of the code)
+        await asyncio.sleep(self.duration_time)
+        # After waiting, turn it off
+        self.is_active = False
+        state.players_skills[client_id] = self
+        broadcast_skill(client_id, self, False)
+
+        print(f"{self.name} duration finished!")
 
 
 class Monster:
@@ -892,12 +978,12 @@ def A_star_algorythm(start, target, desired_range):
 
     return None
 
-def get_next_bullet_position(x, y, angle_degrees):
+def get_next_bullet_position(x, y, angle_degrees, speed):
     angle_rad = math.radians(angle_degrees)
-    return x + math.cos(angle_rad)*15 , y + math.sin(angle_rad)*15
+    return x + math.cos(angle_rad)*speed , y + math.sin(angle_rad)*speed
 
 
-def check_movement(new_pos, old_pos):
+def check_movement(new_pos, old_pos, skill):
     try:
         new_x, new_y = map(float, new_pos.split(","))
         old_x, old_y = map(float, old_pos.split(","))
@@ -906,9 +992,13 @@ def check_movement(new_pos, old_pos):
         return
     if check_if_in_map(new_x, new_y):
         if state.game_map[int(new_y / TILE_SIZE)][int(new_x / TILE_SIZE)] == ".":
-            if abs(new_x - old_x) <= 8 and abs(new_y - old_y) <= 8:
+            current_time = pygame.time.get_ticks() / 1000  # Get time in seconds
+            if (abs(new_x - old_x) <= 6 and abs(new_y - old_y) <= 6) or (
+                    skill.name == "Speed Boost" and current_time - skill.last_action_time - skill.duration_time <= 2):
                 return True
-
+            elif abs(new_x - old_x) <= 10 and abs(
+                    new_y - old_y) <= 10 and skill.name == "Speed Boost" and skill.is_active:
+                return True
     return False
 
 
@@ -1395,6 +1485,11 @@ async def send_heartbeats_to_lb(writer):
     except Exception as e:
         print("[LB] Heartbeat stopped:", e)
 
+skills_dict = {
+        "Speed Boost": Skill("Speed Boost", 10, 0, False),
+        "Shield": Skill("Shield", 6, 0, False),
+        "Bombs": Skill("Bombs", 7, 0, False)
+}
 
 async def main():
     while True:
