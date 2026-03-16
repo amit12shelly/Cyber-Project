@@ -1345,7 +1345,59 @@ async def connect_to_lb():
                 if data.startswith("ID|"):
                     state.server_id = int(data.split("|")[1])
                     print(f"[LB] Assigned ID: {state.server_id}")
-                elif data.startswith("UpdateArea|"):
+
+
+
+                elif msg.startswith("UpdateStats|"):
+
+                    try:
+                        parts = msg.split("|")
+                        state.server_area = {
+                            "t-l": float(parts[1]),
+                            "t-r": float(parts[2])
+                        }
+
+                        weapons = msg.split("|")[3]
+                        weapons = weapons.split(";")
+
+                        for weapon in weapons:
+                            x_str = weapon.split(",")[0]
+                            y_str = weapon.split(",")[1]
+                            w_str = weapon.split(",")[2]
+                            new_id = random.randint(1, 1000000)
+
+                            while new_id in state.map_weapons:
+                                new_id = random.randint(1, 1000000)
+
+                            state.map_weapons[new_id] = {
+                                "x": float(x_str),
+                                "y": float(y_str),
+                                "type": w_str,
+
+                            }
+
+                        potions = msg.split("|")[4]
+                        potions = potions.split(";")
+
+                        for potion in potions:
+                            x_str = potion.split(",")[0]
+                            y_str = potion.split(",")[1]
+                            p_type = potion.split(",")[2]
+                            new_id = random.randint(1, 1000000)
+
+                            while new_id in state.map_potion:
+                                new_id = random.randint(1, 1000000)
+
+                            state.map_potion[new_id] = {
+                                "x": float(x_str),
+                                "y": float(y_str),
+                                "type": p_type,
+                            }
+
+                    except Exception as e:
+                        print("[LB] Failed parsing UpdateArea:", e)
+
+                elif msg.startswith("GET-WEAPON"):
                     try:
                         area_json = data.split("|")[1].strip()
                         state.server_area = json.loads(area_json)
@@ -1408,9 +1460,32 @@ async def register_with_lb_once(lb_ip: str, timeout: float = 5.0) -> bool:
 
             elif msg.startswith("UpdateArea|"):
                 try:
-                    payload = msg.split("|", 1)[1]
-                    area_data = json.loads(payload)
-                    state.server_area = area_data
+                    parts = msg.split("|")
+                    state.server_area = {
+                        "t-l": float(parts[1]),
+                        "t-r": float(parts[2])
+                    }
+                    weapons = msg.split("|")[3]
+                    weapons = weapons.split(";")
+                    for weapon in weapons:
+                        x_str = weapon.split(",")[0]
+                        y_str = weapon.split(",")[1]
+                        w_str = weapon.split(",")[2]
+                        new_id = random.randint(1, 1000000)
+                        while new_id in state.map_weapons:
+                            new_id = random.randint(1, 1000000)
+
+                        state.map_weapons[new_id] = {
+                            "x": float(x_str),
+                            "y": float(y_str),
+                            "type": w_str,
+                        }
+                    potions = msg.split("|")[4]
+                    potions = potions.split(";")
+                    for potion in potions:
+                        x_str = potion.split(",")[0]
+                        y_str = potion.split(",")[1]
+                        p_type = potion.split(",")[2]
 
                     print(f"[LB] Received initial area: {area_data}")
 
