@@ -57,6 +57,10 @@ class GameState:
         self.server_id = None
         self.server_area = None
 
+        #------ Game server neighbors -----
+
+        self.neighbor = {} #left -> x,ip,port /right -> x,ip,port
+
         # ----- players info -----
         self.players_pos = {}          # client_id -> "x,y"
         self.players_hp = {}           # client_id -> hp
@@ -1127,9 +1131,12 @@ async def connect_to_lb():
                     print(f"[LB] Assigned ID: {state.server_id}")
 
 
-                elif msg.startswith("UpdateArea|"):
-                    area_data = json.loads(msg.split("|")[1])
-                    state.server_area = area_data
+                elif msg.startswith("UpdateStats|"):
+                    data = json.loads(msg)
+                    print(msg)
+                    print(data)
+                    state.server_area["t-l"][0] = data.split("|")[1]
+                    state.server_area["t-r"][0] = data.split("|")[2]
 
                     print(
                         f"[LB] Area Updated (X-Range): "
