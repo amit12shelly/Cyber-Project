@@ -931,39 +931,39 @@ def check_movement(new_pos, old_pos, skill):
     if check_if_in_map(new_x, new_y):
         if state.game_map[int(new_y / TILE_SIZE)][int(new_x / TILE_SIZE)] == ".":
             current_time = pygame.time.get_ticks() / 1000  # Get time in seconds
-            if (abs(new_x - old_x) <= 6 and abs(new_y - old_y) <= 6) or (skill.name == "Speed Boost" and current_time - skill.last_action_time - skill.duration_time <= 1):
+            if (abs(new_x - old_x) <= 6 and abs(new_y - old_y) <= 6) or (skill.name == "Speed Boost" and current_time - skill.last_action_time - skill.duration_time <= 2):
                 return True
-            elif abs(new_x - old_x) <= 16 and abs(new_y - old_y) <= 16 and skill.name == "Speed Boost" and skill.is_active:
+            elif abs(new_x - old_x) <= 10 and abs(new_y - old_y) <= 10 and skill.name == "Speed Boost" and skill.is_active:
                 return True
     return False
 
 
 
 def spawn_random_monsters(amount):
-    # tiles_high = len(state.game_map)
-    # tiles_wide = len(state.game_map[0])
-    # global monsters_list
-    # monsters_list = []
-    #
-    # spawned = 0
-    #
-    # while spawned < amount:
-    #
-    #     tile_x = random.randint(0, tiles_wide - 1)
-    #     tile_y = random.randint(0, tiles_high - 1)
-    #
-    #     if state.game_map[tile_y][tile_x] == ".":
-    #
-    #         pixel_x = float(tile_x * TILE_SIZE)
-    #         pixel_y = float(tile_y * TILE_SIZE)
-    #
-    #         monster = Monster(pixel_x, pixel_y, 100)
-    #         monsters_list.append(monster)
-    #
-    #         spawned += 1
-    #
-    # print(f"Server initialized with {spawned} monsters on the map.")
-    return
+    tiles_high = len(state.game_map)
+    tiles_wide = len(state.game_map[0])
+    global monsters_list
+    monsters_list = []
+
+    spawned = 0
+
+    while spawned < amount:
+
+        tile_x = random.randint(0, tiles_wide - 1)
+        tile_y = random.randint(0, tiles_high - 1)
+
+        if state.game_map[tile_y][tile_x] == ".":
+
+            pixel_x = float(tile_x * TILE_SIZE)
+            pixel_y = float(tile_y * TILE_SIZE)
+
+            monster = Monster(pixel_x, pixel_y, 100)
+            monsters_list.append(monster)
+
+            spawned += 1
+
+    print(f"Server initialized with {spawned} monsters on the map.")
+
 
 def spawn_loot_per_camera_zone(game_map, per_zone=2):
     """

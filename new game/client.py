@@ -382,7 +382,7 @@ class Player:
         try:
             if active_skills[MY_ID].name == "Shield":
                 shield_center = (self.x - camera_x + 32, self.y - camera_y + 32)  # +32 to center on 64x64 sprite
-                pygame.draw.circle(screen, (78, 149, 217), shield_center, 40, 3)
+                pygame.draw.circle(screen, (78, 149, 217), shield_center, 40, 2)
         except:
             pass
         # --- HEALTH BAR ---
