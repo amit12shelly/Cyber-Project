@@ -2,12 +2,15 @@ import asyncio
 import json
 import time
 import server
+import weapons_manager
+
 
 WIDTH = 1920 * 64
 LB_IP = "0.0.0.0"
 LB_PORT = 8080
 HEARTBEAT_TIMEOUT = 15
 
+MAP_NAME = "map.txt"
 
 servers = []
 next_server_id = 0
@@ -38,11 +41,25 @@ async def divide_map():
         s.set_x_min(new_min)
         s.set_x_max(new_max)
 
-        area_data = {"t-l": [new_min, 0], "b-r": [new_max, 0]}
-        update_msg = f"UpdateArea|{json.dumps(area_data)}\n"
+        relevant_loot = {
+            weapon_id: data
+            for weapon_id, data in weapons_manager.state.map_weapons.items()
+            if new_min <= data["x"] < new_max
+        }
 
-        s.writer.write(update_msg.encode())
-        await s.writer.drain()
+        area_data = {
+            "t-l": [new_min, 0],
+            "b-r": [new_max, 0],
+            "loot": relevant_loot
+        }
+
+        update_msg = f"UpdateStats|{json.dumps(area_data)}\n"
+
+        try:
+            s.writer.write(update_msg.encode())
+            await s.writer.drain()
+        except Exception as e:
+            print(f"[!] Failed to send update to GS-{s.id}: {e}")
 
         current_x = new_max
 
@@ -51,7 +68,6 @@ async def update_server_stats():
     global servers
     while True:
         await asyncio.sleep(5)
-        now = time.time()
 
         # removing offline servers
         alive_servers = [s for s in servers if s.is_alive(HEARTBEAT_TIMEOUT)]
@@ -171,7 +187,29 @@ async def handle_gs_lifecycle(reader, writer):
         await writer.wait_closed()
 
 
+def load_map(map_name):
+    with open(map_name, "r") as f:
+        lines = f.readlines()
+    return [list(line.strip()) for line in lines]
+
+
 async def main():
+    print("[*] Loading map file...")
+    try:
+        game_map = load_map(MAP_NAME)
+    except FileNotFoundError:
+        print(f"[!] Critical: {MAP_NAME} not found!")
+        return
+
+    if game_map:
+        print(f"[*] Map loaded. Size: {len(game_map[0])}x{len(game_map)} tiles.")
+
+        weapons_manager.spawn_loot_per_camera_zone(game_map, per_zone=2)
+        total_spawned = len(weapons_manager.state.map_weapons)
+
+        print(f"[*] Success! {total_spawned} weapons spawned on walkable tiles.")
+
+
     server = await asyncio.start_server(handle_gs_lifecycle, LB_IP, LB_PORT)
     print(f"[*] Load Balancer running on {LB_IP}:{LB_PORT}")
 
