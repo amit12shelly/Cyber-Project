@@ -2,10 +2,11 @@ import asyncio
 import json
 import time
 from server import game_server
+import os
 
 WIDTH = 1920 * 64
-LB_IP = "0.0.0.0"
-LB_PORT = 8080
+LB_IP = os.getenv("LB_IP", "127.0.0.1")
+LB_PORT = int(os.getenv("LB_PORT", 8080))
 HEARTBEAT_TIMEOUT = 15
 
 

@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  login-server:
+    build: ./loginserver
+    restart: always
+    ports:
+      - "8820:8820"
+    environment:
+      - LB_IP=192.168.5.87
+      - LB_PORT=8080
+    volumes:
+      - ./loginserver/game.db:/loginserver/game.db
+    extra_hosts:
+      - "my-lb:192.168.5.87"
+
+volumes:
+  login_db_data:

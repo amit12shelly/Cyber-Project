@@ -2,13 +2,13 @@ FROM python:3.13-slim
 
 ENV PYTHONUNBUFFERED=1
 
-COPY . /loadBalncer
+COPY . /loginserver
 
-WORKDIR /loadBalncer
+WORKDIR /loginserver
 
 EXPOSE 4433
 
 RUN pip install aioquic
 
 
-CMD ["python", "load_balancer.py"]
+CMD ["python", "login_server.py"]
