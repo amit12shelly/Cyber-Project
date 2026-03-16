@@ -1,10 +1,14 @@
-version: '3.13'
+version: '3.8'
 
 services:
   game-server:
-    network_mode: host
-    build:
-      context: ./server
-      dockerfile: Dockerfile
+    build: ./server
+    restart: always
     ports:
-      - "4433:4433/udp"
+    - "4433-4483:4433/udp"
+    extra_hosts:
+      - "my-database:192.168.1.10"
+      - "my-login-server:192.168.1.10"
+    deploy:
+      mode: replicated
+      replicas: 50
