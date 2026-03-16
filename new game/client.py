@@ -4,7 +4,6 @@ import threading
 import asyncio
 import queue
 import math
-import sys
 import time
 from queue import Queue
 from aioquic.asyncio import connect
@@ -28,44 +27,111 @@ CHAT_X = 10
 CHAT_Y_BOTTOM_OFFSET = 120
 BULLETS = []
 
+current_host = ""
+current_port = None
+SENDING_UPDATES = True
 
 async def quic_network_loop(host, port):
+    global current_host, current_port
+    current_host = host
+    current_port = port
+
     config = QuicConfiguration(
         is_client=True,
         alpn_protocols=["echo-protocol"],
         verify_mode=False
     )
 
-    async with connect(host, port, configuration=config) as client:
-        stream_reader, stream_writer = await client.create_stream()
-        print(f"Connected to Game Server at {host}:{port}!")
+    while True:
+        try:
+            print(f"[*] Attempting to connect to {current_host}:{current_port}...")
 
-        async def read_from_server():
-            buffer = ""
-            while True:
-                data = await stream_reader.read(4096)
-                if not data:
-                    await asyncio.sleep(0.01)
-                    continue
+            async with connect(current_host, current_port, configuration=config) as client:
+                stream_reader, stream_writer = await client.create_stream()
+                print(f"[+] Connected to Game Server!")
 
-                buffer += data.decode()
+                async def read_from_server():
+                    global current_host, current_port
+                    buffer = ""
+                    while True:
+                        try:
+                            data = await stream_reader.read(4096)
+                            if not data: break
 
-                while "\n" in buffer:
-                    msg, buffer = buffer.split("\n", 1)
-                    msg = msg.strip()
-                    if msg:
-                        incoming_messages.put(msg)
+                            buffer += data.decode()
+                            while "\n" in buffer:
+                                msg, buffer = buffer.split("\n", 1)
+                                msg = msg.strip()
+                                if not msg: continue
 
-        async def write_to_server():
-            while True:
-                try:
-                    msg = outgoing_messages.get_nowait()
-                    stream_writer.write((msg + "\n").encode())
-                    await stream_writer.drain()
-                except queue.Empty:
-                    await asyncio.sleep(0.01)
+                                if msg.startswith("SWITCH|"):
+                                    parts = msg.split("|")
+                                    if len(parts) >= 3:
+                                        new_host = parts[1]
+                                        new_port = int(parts[2])
 
-        await asyncio.gather(read_from_server(), write_to_server())
+                                        # --- התיקון הקריטי ---
+                                        # מרוקנים את כל ההודעות שנכנסו מהשרת הישן ולא עובדו עדיין
+                                        while not incoming_messages.empty():
+                                            try:
+                                                incoming_messages.get_nowait()
+                                            except:
+                                                break
+
+                                        # מעדכנים את היעד הבא וסוגרים את הקשר הנוכחי
+                                        current_host = new_host
+                                        current_port = new_port
+                                        await client.close()
+                                        return
+
+                                incoming_messages.put(msg)
+                        except Exception:
+                            break
+
+                async def write_to_server():
+                    while True:
+                        try:
+                            msg = outgoing_messages.get_nowait()
+
+                            # אם זו בקשת החלפה מיוחדת שנשלחה מהמיין:
+                            if isinstance(msg, str) and msg.startswith("__SWITCH__|"):
+                                # פורמט: __SWITCH__|host|port
+                                try:
+                                    _, nhost, nport = msg.split("|")
+                                    nport = int(nport)
+                                except Exception as e:
+                                    print(f"[NETWORK] bad SWITCH message: {msg} ({e})")
+                                    continue
+
+                                global current_host, current_port
+                                current_host = nhost
+                                current_port = nport
+                                print(f"[*] Network thread: switch requested to {current_host}:{current_port}")
+                                return
+
+                            stream_writer.write((msg + "\n").encode())
+                            await stream_writer.drain()
+
+                        except queue.Empty:
+                            await asyncio.sleep(0.01)
+                        except Exception as e:
+                            print(f"[NETWORK] writer error: {e}")
+                            break
+
+                done, pending = await asyncio.wait(
+                    [asyncio.create_task(read_from_server()),
+                     asyncio.create_task(write_to_server())],
+                    return_when=asyncio.FIRST_COMPLETED
+                )
+
+                for task in pending:
+                    task.cancel()
+
+            print("[*] Connection closed. Reconnecting to next target...")
+
+        except Exception as e:
+            print(f"[!] Network error: {e}")
+            await asyncio.sleep(1)
 
 def start_quic_thread(ip, port):
     loop = asyncio.new_event_loop()
@@ -545,7 +611,7 @@ def main():
 
         px = int(float(player_data.get("x", 128)))
         py = int(float(player_data.get("y", 128)))
-        php = int(player_data.get("hp", 100)) # player hp
+        php = int(player_data.get("hp", 100))
         player = Player(px, py)
         player.hp = php
 
@@ -686,6 +752,37 @@ def main():
                 if not parts:
                     continue
 
+                if parts[0] == "CLEAR_ENTITIES":
+                    remote_players.clear()
+                    monsters.clear()
+                    # bullets.clear() # אופציונלי, תלוי אם אתה רוצה שהכדורים ייעלמו
+                    continue
+
+                if parts[0] == "REDIRECT":
+                    try:
+                        _, new_host, new_port = parts
+                        new_port = int(new_port)
+                    except Exception as e:
+                        print(f"[CLIENT] bad REDIRECT: {msg} ({e})")
+                    else:
+                        print(f"[!] Switching to new server: {new_host}:{new_port}")
+
+                        global SENDING_UPDATES
+                        SENDING_UPDATES = False
+
+                        # עדכון כתובת השרת
+                        gs_ip = new_host
+                        gs_port = new_port
+
+                        # חיבור מחדש לשרת החדש
+                        start_quic_thread(gs_ip, gs_port)
+
+                        # שליחת המיקום לשרת החדש
+                        outgoing_messages.put(f"Connected|{player.x},{player.y}|{player.hp}")
+                        outgoing_messages.put(f"UPDATE|{player.x},{player.y}")
+
+                    return
+
                 if parts[0] == "UPDATE":
                     if len(parts) < 4:
                         continue
@@ -782,8 +879,8 @@ def main():
                     chat_messages.append((f"<{display_name}> {parts[2]}", time.time()))
 
                 elif parts[0] == "SETID":
-                    if MY_ID == "":
-                        MY_ID = parts[1]
+                    MY_ID = parts[1]
+                    print(f"[CLIENT] Assigned MY_ID = {MY_ID}")
 
                 elif parts[0] == "FPS":
                     server_fps = parts[1]

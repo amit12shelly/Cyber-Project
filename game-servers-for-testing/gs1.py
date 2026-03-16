@@ -41,6 +41,9 @@ LB_PORT = 8080
 MY_IP = gs_and_lb_helper_functions.get_local_ip()
 MY_PORT = 4434
 
+P2P_PORT_OFFSET = 4000
+
+
 def load_map():
     with open("map.txt", "r") as f:
         lines = f.readlines()
@@ -56,8 +59,10 @@ class GameState:
 
         self.server_id = None
         self.server_area = None
+        self.neighbor_conns = {}
 
         # ----- players info -----
+        self.ghost_players = {}
         self.players_pos = {}          # client_id -> "x,y"
         self.players_hp = {}           # client_id -> hp
         self.players_inventory = {}    # client_id -> {slot1..slot5}
@@ -81,6 +86,15 @@ class EchoQuicProtocol(QuicConnectionProtocol):
         state.active_clients.add(self)
         self.stream_id = None
         self.recv_buffer = ""  # for newline-delimited messages
+
+    def broadcast_remove_player(self, client_id):
+        msg = f"REMOVE_PLAYER|{client_id}\n".encode()
+        for client in state.active_clients:
+            try:
+                client._quic.send_stream_data(client.stream_id, msg)
+                client.transmit()
+            except:
+                pass
 
     def quic_event_received(self, event: QuicEvent) -> None:
         if isinstance(event, StreamDataReceived):
@@ -153,30 +167,72 @@ class EchoQuicProtocol(QuicConnectionProtocol):
         elif data_str.startswith("UPDATE|"):
             try:
                 parts = data_str.split("|")
-            except:
-                print("Error while splitting UPDATE command!")
-                return
-            if len(parts) < 2:
-                return
-            new_pos = parts[1]
+                if len(parts) < 2: return
 
-            if self._quic.host_cid.hex() not in state.players_pos:
-                return
-            for other_id, other_pos in list(state.players_pos.items()):
-                if other_id == self._quic.host_cid.hex():
-                    continue
-                if other_pos == new_pos:
-                    self.disconnect()  # kick the player
-                    print("player has been kicked! player collision")
+                new_pos = parts[1]
+                client_id = self._quic.host_cid.hex()
+
+                # 1. אימות בסיסי - האם השחקן קיים והתנועה חוקית?
+                if client_id not in state.players_pos: return
+
+                if not check_movement(new_pos, state.players_pos[client_id]):
+                    print(f"[!] {client_id} kicked: Movement violation")
+                    self.disconnect()
                     return
 
-            if check_movement(new_pos, state.players_pos[self._quic.host_cid.hex()]):
-                state.players_pos[self._quic.host_cid.hex()] = new_pos
-                self.broadcast_player(self._quic.host_cid.hex(), new_pos, state.players_hp[self._quic.host_cid.hex()],
-                                      False)
-            else:
-                self.disconnect() #kick the player
-                print("player has been kicked! movement problem")
+                # 2. עדכון המיקום בשרת המקומי (אחרי שווידאנו שהתנועה חוקית)
+                state.players_pos[client_id] = new_pos
+                px, _ = map(float, new_pos.split(","))
+
+                # 3. בדיקת תחומי אחריות (רק אם ה-LB כבר שלח לנו שטח)
+                if state.server_area:
+                    core_min, core_max = state.server_area['core']
+                    overlap = 500  # כדאי להגדיר כקבוע גלובלי
+
+                    # --- לוגיקת Handoff (מעבר שרת) ---
+                    if px < core_min or px > core_max:
+                        direction = "left" if px < core_min else "right"
+                        neighbor = state.server_area['neighbors'].get(direction)
+
+                        if neighbor:
+                            # 1. שלח הודעת ניקוי לשכנים - כדי שלא יישאר Ghost תקוע
+                            for side in ["left", "right"]:
+                                n = state.server_area['neighbors'].get(side)
+                                if n:
+                                    asyncio.create_task(send_to_neighbor(n['id'], f"REMOVE_GHOST|{client_id}\n"))
+
+                            # 2. בצע את ה-SWITCH
+                            switch_msg = f"SWITCH|{neighbor['host']}|{neighbor['port']}\n".encode()
+                            self._quic.send_stream_data(self.stream_id, switch_msg)
+                            self.transmit()
+
+                            # 3. ניקוי מקומי וניתוק
+                            state.players_pos.pop(client_id, None)
+                            state.active_clients.discard(self)
+                            self.disconnect()
+                            return
+
+
+                    in_left_zone = px < (core_min + overlap)
+                    in_right_zone = px > (core_max - overlap)
+
+                    if in_left_zone or in_right_zone:
+                        side = "left" if in_left_zone else "right"
+                        neighbor = state.server_area['neighbors'].get(side)
+                        if neighbor:
+                            ghost_msg = f"GHOST_UPDATE|{client_id}|{new_pos}|{state.players_hp[client_id]}\n"
+                            asyncio.create_task(send_to_neighbor(neighbor['id'], ghost_msg))
+                    else:
+                        for side in ["left", "right"]:
+                            neighbor = state.server_area['neighbors'].get(side)
+                            if neighbor:
+                                remove_ghost_msg = f"REMOVE_GHOST|{client_id}\n"
+                                asyncio.create_task(send_to_neighbor(neighbor['id'], remove_ghost_msg))
+
+                self.broadcast_player(client_id, new_pos, state.players_hp[client_id], False)
+
+            except Exception as e:
+                print(f"Error in UPDATE logic: {e}")
 
         # ATTACK
         elif data_str.startswith("ATTACK|"):
@@ -424,16 +480,27 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             client._quic.send_stream_data(client.stream_id, msg, end_stream=False)
             client.transmit()
 
-    def broadcast_player(self, sender_id: str, pos_str: str, hp, to_yourself: bool):
-        msg = f"UPDATE|{sender_id}|{pos_str}|{hp}\n".encode()
+    def broadcast_player(self, client_id, pos, hp, is_dead=False):
+        msg = f"PLAYER_UPDATE|{client_id}|{pos}|{hp}|{is_dead}\n".encode()
+
         for client in list(state.active_clients):
-            if client == self and not to_yourself:
-                continue
-            if client.stream_id is None:
-                continue
-            client._quic.send_stream_data(client.stream_id, msg, end_stream=False)
-            client.transmit()
-        print("changed! -", msg)
+            if client.stream_id is not None:
+                try:
+                    client._quic.send_stream_data(client.stream_id, msg)
+                    client.transmit()
+                except:
+                    continue
+
+    def broadcast_ghosts(self):
+        for g_id, g_data in state.ghost_players.items():
+            g_msg = f"PLAYER_UPDATE|{g_id}|{g_data['pos']}|{g_data['hp']}|False\n".encode()
+            for client in list(state.active_clients):
+                if client.stream_id is not None:
+                    try:
+                        client._quic.send_stream_data(client.stream_id, g_msg)
+                        client.transmit()
+                    except:
+                        continue
 
     # ---------- Game logic ---------- #
 
@@ -1095,57 +1162,130 @@ def broadcast_fps():
         client.transmit()
 
 
+async def handle_p2p_connection(reader, writer):
+    try:
+        while True:
+            line = await reader.readline()
+            if not line: break
+
+            data = line.decode().strip()
+            parts = data.split("|")
+
+            if parts[0] == "GHOST_UPDATE":
+                cid = parts[1]
+                pos = parts[2]
+                hp = int(parts[3])
+                state.ghost_players[cid] = {"pos": pos, "hp": hp}
+
+                if state.active_clients:
+                    any_client = next(iter(state.active_clients))
+                    any_client.broadcast_ghosts()
+
+
+            elif parts[0] == "REMOVE_GHOST":
+                cid = parts[1]
+                state.ghost_players.pop(cid, None)
+
+                remove_msg = f"REMOVE_PLAYER|{cid}\n".encode()
+                for client in list(state.active_clients):  # שימוש ב-active_clients
+                    try:
+                        if client.stream_id is not None:
+                            client._quic.send_stream_data(client.stream_id, remove_msg)
+                            client.transmit()
+                    except:
+                        continue
+
+    except Exception as e:
+        print(f"[P2P] Error: {e}")
+
+
+async def connect_to_neighbor(neighbor_id, host, port):
+    """יוצר חיבור P2P לשרת שכן אם הוא לא קיים"""
+    if neighbor_id not in state.neighbor_conns:
+        try:
+            # ה-P2P יושב על פורט עם Offset (למשל +4000)
+            p2p_port = port + P2P_PORT_OFFSET
+            reader, writer = await asyncio.open_connection(host, p2p_port)
+            state.neighbor_conns[neighbor_id] = (reader, writer)
+            print(f"[*] Connected P2P to GS-{neighbor_id} at {host}:{p2p_port}")
+        except Exception as e:
+            print(f"[!] Failed to connect to GS-{neighbor_id}: {e}")
+
+
+async def send_to_neighbor(neighbor_id, message):
+    neighbor = None
+    if state.server_area:
+        for side in ["left", "right"]:
+            n = state.server_area['neighbors'].get(side)
+            if n and n['id'] == neighbor_id:
+                neighbor = n
+                break
+
+    if neighbor:
+        await connect_to_neighbor(neighbor['id'], neighbor['host'], neighbor['port'])
+
+        if neighbor_id in state.neighbor_conns:
+            _, writer = state.neighbor_conns[neighbor_id]
+            try:
+                writer.write(message.encode())
+                await writer.drain()
+            except:
+                print(f"[!] Lost P2P connection to GS-{neighbor_id}")
+                del state.neighbor_conns[neighbor_id]
+
+
 async def connect_to_lb():
     while True:
         try:
             print(f"[*] Attempting to connect to LB at {state.lb_host}:{state.lb_port}...")
-
             reader, writer = await asyncio.open_connection(state.lb_host, state.lb_port)
-            state.lb_writer = writer
 
-            connect_msg = f"Server connect|{MY_IP}|{psutil.cpu_percent()}|{MY_PORT}\n"
-            writer.write(connect_msg.encode())
+            # שלח הודעת הזדהות (אם יש ID השתמש ב-RECONNECT, אם לא REGISTER)
+            auth_type = "RECONNECT" if state.server_id is not None else "REGISTER"
+            payload = f"{auth_type}|{state.server_id if state.server_id is not None else f'{MY_IP}|{MY_PORT}'}\n"
+
+            writer.write(payload.encode())
             await writer.drain()
 
-            asyncio.create_task(send_heartbeats_to_lb(writer))
-
+            # לולאת האזנה לעדכונים מה-LB (שטחי מפה, שכנים וכו')
             while True:
                 line = await reader.readline()
                 if not line:
-                    break
+                    break  # החיבור נסגר
 
-                msg = line.decode().strip()
-
-
-                if msg.startswith("Connected|"):
-                    state.server_id = int(msg.split("|")[1])
+                data = line.decode().strip()
+                if data.startswith("ID|"):
+                    state.server_id = int(data.split("|")[1])
                     print(f"[LB] Assigned ID: {state.server_id}")
+                elif data.startswith("UpdateArea|"):
+                    try:
+                        area_json = data.split("|")[1].strip()
+                        state.server_area = json.loads(area_json)
 
+                        core = state.server_area.get('core', [0, 0])
+                        neighbors = state.server_area.get('neighbors', {})
 
-                elif msg.startswith("UpdateArea|"):
-                    area_data = json.loads(msg.split("|")[1])
-                    state.server_area = area_data
+                        print("\n" + "=" * 40)
+                        print(f"[LB UPDATE] GS-{MY_PORT} Area: {core[0]} -> {core[1]}")
+                        print(f"[LB UPDATE] Neighbors found: {list(neighbors.keys())}")
 
-                    print(
-                        f"[LB] Area Updated (X-Range): "
-                        f"{state.server_area['t-l'][0]} to {state.server_area['b-r'][0]}"
-                    )
+                        for side, info in neighbors.items():
+                            print(f"   -> {side.upper()}: GS-{info['id']} ({info['host']}:{info['port']})")
+                        print("=" * 40 + "\n")
 
-                elif msg.startswith("TransferClient|"):
-                    _, c_id, n_ip, n_port = msg.split("|")
+                        for side, info in neighbors.items():
+                            asyncio.create_task(connect_to_neighbor(info['id'], info['host'], info['port']))
 
-                    for client in list(state.active_clients):
-                        if client._quic.host_cid.hex() == c_id:
-                            print(f"[LB] Sending SWITCH to client {c_id} -> {n_ip}:{n_port}")
+                    except Exception as e:
+                        print(f"[!] Error updating area: {e}")
 
-                            switch_msg = f"SWITCH|{n_ip}|{n_port}\n".encode()
-                            client._quic.send_stream_data(client.stream_id, switch_msg)
-                            client.transmit()
+            writer.close()
+            await writer.wait_closed()
 
         except Exception as e:
             print(f"[LB] Connection error: {e}. Retrying in 5 seconds...")
-            state.lb_writer = None
-            await asyncio.sleep(5)
+
+        await asyncio.sleep(5)
 
 
 async def register_with_lb_once(lb_ip: str, timeout: float = 5.0) -> bool:
@@ -1186,16 +1326,27 @@ async def register_with_lb_once(lb_ip: str, timeout: float = 5.0) -> bool:
 
                     print(f"[LB] Received initial area: {area_data}")
 
-                    writer.close()
-                    await writer.wait_closed()
+                    # ** don't close the writer here **
+                    # save persistent connection info so we can send heartbeats and receive updates
+                    state.lb_host = lb_ip
+                    state.lb_port = LB_PORT
+                    state.lb_writer = writer
+
+                    # start the heartbeat task that will keep the connection alive
+                    asyncio.create_task(update_listener(reader))
+                    asyncio.create_task(send_heartbeats_to_lb(writer))
                     return True
 
                 except Exception as e:
                     print("[LB] Failed parsing UpdateArea:", e)
                     break
 
-        writer.close()
-        await writer.wait_closed()
+        # if we get here, registration failed -> close temporary writer
+        try:
+            writer.close()
+            await writer.wait_closed()
+        except:
+            pass
 
         print("[LB] One-shot registration failed or timed out.")
         return False
@@ -1203,6 +1354,34 @@ async def register_with_lb_once(lb_ip: str, timeout: float = 5.0) -> bool:
     except Exception as e:
         print(f"[LB] Connection error in one-shot registration: {e}")
         return False
+
+
+async def update_listener(reader):
+    """משימה שרצה ברקע ומעדכנת את גבולות הגזרה של השרת"""
+    while True:
+        try:
+            line = await reader.readline()
+            if not line:
+                print("[LB] Connection closed by Load Balancer.")
+                break
+
+            msg = line.decode().strip()
+            if msg.startswith("UpdateArea|"):
+                payload = msg.split("|", 1)[1]
+                area_data = json.loads(payload)
+                state.server_area = area_data
+                print(f"[LB] Area updated: {area_data['core']}")
+
+        except Exception as e:
+            print(f"[LB] Error in listener: {e}")
+            break
+
+def broadcast_all_states(self):
+    for cid, pos in state.players_pos.items():
+        self.send_to_all(f"PLAYER_UPDATE|{cid}|{pos}|{state.players_hp[cid]}")
+
+    for cid, data in state.ghost_players.items():
+        self.send_to_all(f"PLAYER_UPDATE|{cid}|{data['pos']}|{data['hp']}")
 
 
 async def send_heartbeats_to_lb(writer):
@@ -1248,18 +1427,32 @@ async def main():
         configuration=config,
         create_protocol=EchoQuicProtocol,
     ))
+    print(f"[*] Game Server (QUIC) running on {MY_IP}:{MY_PORT}")
 
-    asyncio.create_task(connect_to_lb())
-    asyncio.create_task(check_cpu())
-    asyncio.create_task(monsters_manager())
-    asyncio.create_task(track_server_fps())
-    await asyncio.Future()
+    p2p_port = MY_PORT + P2P_PORT_OFFSET
+    p2p_server = await asyncio.start_server(handle_p2p_connection, MY_IP, p2p_port)
+    print(f"[*] P2P Sync Server running on {MY_IP}:{p2p_port}")
+
+    tasks = [
+        asyncio.create_task(check_cpu()),
+        asyncio.create_task(monsters_manager()),
+        asyncio.create_task(track_server_fps()),
+    ]
+
+    try:
+        await asyncio.gather(*tasks)
+    except Exception as e:
+        print(f"[CRITICAL] A core task crashed: {e}")
+    finally:
+        p2p_server.close()
+        await p2p_server.wait_closed()
+        print("[*] Server shutting down...")
 
 
 if __name__ == "__main__":
-    spawn_loot_per_camera_zone(state.game_map)
-    spawn_random_monsters(MONSTERS_AMOUNT)
-    spawn_potions_per_camera_zone(state.game_map)
+    #spawn_loot_per_camera_zone(state.game_map)
+    #spawn_random_monsters(MONSTERS_AMOUNT)
+    #spawn_potions_per_camera_zone(state.game_map)
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
