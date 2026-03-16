@@ -972,6 +972,11 @@ async def monsters_manager():
             if dist_to_player > 1500:
                 monster.path = None
                 continue
+                t-l(x,0)
+            if monster.x < state.server_area["t-l"][0] or monster.x > state.server_area["t-r"][0]:
+                msg = f"CHANGE-MONSTER|{monster.x}|{monster.y}|{monster.weapon}"
+                await send_to_lb(msg)
+                del monster
 
             # --- הגיון הלחימה של המפלצת ---
             # אם השחקן בטווח הנשק של המפלצת
@@ -1131,6 +1136,60 @@ async def connect_to_lb():
                         f"{state.server_area['t-l'][0]} to {state.server_area['b-r'][0]}"
                     )
 
+                elif msg.startswith("GET-WEAPON"):
+                    try:
+                        parts = msg.split("|")[1:]
+                        for weapons in parts:
+                            x_str = weapons.split(",")[0]
+                            y_str = weapons.split(",")[0]
+                            w_type = weapons.split(",")[0]
+                            new_id = random.randint(1, 1000000)
+                            while new_id in state.map_weapons:
+                                new_id = random.randint(1, 1000000)
+
+                            state.map_weapons[new_id] = {
+                                "x": float(x_str),
+                                "y": float(y_str),
+                                "type": w_type,
+                            }
+                    except:
+                        print("Error while getting weapons from lb")
+
+                elif msg.startswith("GET-MONSTER"):
+                    try:
+                        parts = msg.split("|")[1:]
+                        for monsters in parts:
+                            pixel_x = monsters.split(",")[0]
+                            pixel_y = monsters.split(",")[1]
+                            hp = monsters.split(",")[2]
+                            monster = Monster(pixel_x, pixel_y, hp)
+                            monsters_list.append(monster)
+                    except:
+                        print("Error while getting monsters from lb")
+
+
+
+                elif msg.startswith("GET-POTION"):
+                    try:
+                        parts = msg.split("|")[1:]
+                        for potions in parts:
+                            x_str = potions.split(",")[0]
+                            y_str = potions.split(",")[0]
+                            w_type = potions.split(",")[0]
+                            new_id = random.randint(1, 1000000)
+                            while new_id in state.map_potion:
+                                new_id = random.randint(1, 1000000)
+
+                            state.map_weapons[new_id] = {
+                                "x": float(x_str),
+                                "y": float(y_str),
+                                "type": w_type,
+                            }
+                    except:
+                        print("Error while getting potion from lb")
+
+
+
                 elif msg.startswith("TransferClient|"):
                     _, c_id, n_ip, n_port = msg.split("|")
 
@@ -1146,6 +1205,22 @@ async def connect_to_lb():
             print(f"[LB] Connection error: {e}. Retrying in 5 seconds...")
             state.lb_writer = None
             await asyncio.sleep(5)
+
+
+async def send_to_lb(message: str):
+    if state.lb_writer is not None:
+        try:
+            # חשוב להוסיף \n בסוף כדי שה-LB יוכל לקרוא עם readline()
+            if not message.endswith("\n"):
+                message += "\n"
+
+            state.lb_writer.write(message.encode())
+            await state.lb_writer.drain()
+        except Exception as e:
+            print(f"Error sending to LB: {e}")
+            state.lb_writer = None  # איפוס כדי ש-connect_to_lb ינסה להתחבר מחדש
+    else:
+        print("LB connection not available.")
 
 
 async def register_with_lb_once(lb_ip: str, timeout: float = 5.0) -> bool:
@@ -1257,9 +1332,6 @@ async def main():
 
 
 if __name__ == "__main__":
-    spawn_loot_per_camera_zone(state.game_map)
-    spawn_random_monsters(MONSTERS_AMOUNT)
-    spawn_potions_per_camera_zone(state.game_map)
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
