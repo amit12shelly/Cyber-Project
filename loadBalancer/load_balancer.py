@@ -18,7 +18,7 @@ next_server_id = 0
 
 
 def serialize_items(items_dict):
-    return ";".join([f"{id},{data['x']},{data['y']},{data['type']}"
+    return ";".join([f"{data['x']},{data['y']},{data['type']}"
                      for id, data in items_dict.items()])
 
 
