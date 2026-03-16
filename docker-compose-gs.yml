@@ -1,15 +1,35 @@
 version: '3.8'
 
 services:
-  game-server:
+  game-server-1:
     build: ./server
     restart: always
     ports:
+      - "4433:4433/udp" # פורט QUIC ללקוחות
+      - "8433:8433"     # פורט P2P לשכנים (4433 + 4000)
+    environment:
+      - LB_IP=192.168.5.87
+      - HOST_IP=192.168.5.87
+      - MY_PORT=4433    # מזהה הפורט שדווח ל-LB
 
-      - "4433-4483:4433/udp"
-    extra_hosts:
-      "my-database:192.168.5.87"
-      "my-login-server:192.168.5.87"
-    deploy:
-      mode: replicated
-      replicas: 50
+  game-server-2:
+    build: ./server
+    restart: always
+    ports:
+      - "4434:4434/udp"
+      - "8434:8434"     # (4434 + 4000)
+    environment:
+      - LB_IP=192.168.5.87
+      - HOST_IP=192.168.5.87
+      - MY_PORT=4434    # חשוב מאוד! מעדכן את הפייתון
+
+  game-server-3:
+    build: ./server
+    restart: always
+    ports:
+      - "4435:4435/udp"
+      - "8435:8435"     # (4435 + 4000)
+    environment:
+      - LB_IP=192.168.5.87
+      - HOST_IP=192.168.5.87
+      - MY_PORT=4435    # חשוב מאוד! מעדכן את הפייתון

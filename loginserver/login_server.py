@@ -1,4 +1,5 @@
 import asyncio
+import os
 import ssl
 import database
 
@@ -6,8 +7,8 @@ import database
 IP = "0.0.0.0"
 PORT = 8820
 
-LB_IP = "127.0.0.1"
-LB_PORT = 8080
+LB_IP = os.getenv("LB_IP", "192.168.5.87")
+LB_PORT = int(os.getenv("LB_PORT", 8080))
 
 
 async def get_best_gs_from_lb(x, y):
