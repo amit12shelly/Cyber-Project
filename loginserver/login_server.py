@@ -130,5 +130,8 @@ async def main():
         await server.serve_forever()
 
 
-if __name__ == '__main__':
-    asyncio.run(main())
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\n[*] Server stopped by user.")

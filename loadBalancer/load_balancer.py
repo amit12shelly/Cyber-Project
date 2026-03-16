@@ -1,26 +1,21 @@
 import asyncio
 import json
 import time
-from server import game_server
-import os
+import server
 
 WIDTH = 1920 * 64
-LB_IP = os.getenv("LB_IP", "127.0.0.1")
-LB_PORT = int(os.getenv("LB_PORT", 8080))
+LB_IP = "0.0.0.0"
+LB_PORT = 8080
 HEARTBEAT_TIMEOUT = 15
 
 
 servers = []
 next_server_id = 0
 
-OVERLAP_SIZE = 500
-
 
 async def divide_map():
     if not servers:
         return
-
-    sorted_servers = sorted(servers, key=lambda s: s.get_x_min())
 
     total_weight = 0
     weights = []
@@ -33,34 +28,18 @@ async def divide_map():
 
     current_x = 0
 
-    for i, s in enumerate(sorted_servers):
+    for i, s in enumerate(servers):
         portion = weights[i] / total_weight
         width = int(WIDTH * portion)
 
         new_min = current_x
         new_max = current_x + width if i < len(servers)-1 else WIDTH
 
-        neighbors = {}
-        if i > 0:
-            left = sorted_servers[i - 1]
-            neighbors["left"] = {"id": left.id, "host": left.ip, "port": left.port}
-        if i < len(sorted_servers) - 1:  # שכן מימין
-            right = sorted_servers[i + 1]
-            neighbors["right"] = {"id": right.id, "host": right.ip, "port": right.port}
+        s.set_x_min(new_min)
+        s.set_x_max(new_max)
 
-        area_data = {
-            "core": [new_min, new_max],
-            "view": [max(0, new_min - OVERLAP_SIZE), min(WIDTH, new_max + OVERLAP_SIZE)],
-            "neighbors": neighbors
-        }
-
-        s.x_min = new_min
-        s.x_max = new_max
-
+        area_data = {"t-l": [new_min, 0], "b-r": [new_max, 0]}
         update_msg = f"UpdateArea|{json.dumps(area_data)}\n"
-
-        s.writer.write(update_msg.encode())
-        await s.writer.drain()
 
         s.writer.write(update_msg.encode())
         await s.writer.drain()
@@ -72,6 +51,7 @@ async def update_server_stats():
     global servers
     while True:
         await asyncio.sleep(5)
+        now = time.time()
 
         # removing offline servers
         alive_servers = [s for s in servers if s.is_alive(HEARTBEAT_TIMEOUT)]
@@ -134,7 +114,7 @@ async def handle_gs_lifecycle(reader, writer):
                 if gs_ip == "0.0.0.0":
                     gs_ip = peer_ip
 
-                current_gs = game_server(next_server_id, gs_ip, gs_port, 0, WIDTH, writer)
+                current_gs = server.game_server(next_server_id, gs_ip, gs_port, 0, WIDTH, writer)
                 current_gs.set_cpu(gs_cpu)
 
                 servers.append(current_gs)
@@ -158,7 +138,7 @@ async def handle_gs_lifecycle(reader, writer):
                         s.last_seen = time.time()
 
                         # אם ה-CPU השתנה משמעותית -> מחלקים מחדש
-                        if abs(old_cpu - cpu_load) > 100:
+                        if abs(old_cpu - cpu_load) > 10:
                             await divide_map()
                         break
 
