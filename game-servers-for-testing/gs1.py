@@ -207,8 +207,6 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                             self.transmit()
 
                             # 3. ניקוי מקומי וניתוק
-                            state.players_pos.pop(client_id, None)
-                            state.active_clients.discard(self)
                             self.disconnect()
                             return
 
