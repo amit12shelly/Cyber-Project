@@ -364,7 +364,11 @@ class Player:
                 self.y += dy
 
     def draw(self, screen, camera_x, camera_y):
-        if self.has_weapon_equipped():
+        try:
+            print(self.inventory[self.selected_slot].name)
+        except:
+            pass
+        if self.has_weapon_equipped() and self.inventory[self.selected_slot].name != "knife":
             sprite = self.weapon_sprites[self.direction]
         else:
             sprite = self.base_sprites[self.direction]
@@ -547,11 +551,12 @@ def main():
     weapon_images = {
         "rifle": pygame.transform.scale(pygame.image.load("img/leftWeapon1.png").convert_alpha(), (64, 64)),
         "gun": pygame.transform.scale(pygame.image.load("img/rightWeapon1.png").convert_alpha(), (64, 64)),
-        "rpg": pygame.transform.scale(pygame.image.load("img/rpg_right.png").convert_alpha(), (64, 64))
+        "rpg": pygame.transform.scale(pygame.image.load("img/rpg_right.png").convert_alpha(), (64, 64)),
+        "knife": pygame.transform.scale(pygame.image.load("img/knife.png").convert_alpha(), (56, 64)),
     }
     monster_img = pygame.transform.scale(pygame.image.load("img/monster_down.png").convert_alpha(), (64, 64))
     potion_img =  pygame.transform.scale(pygame.image.load("img/hp_Potion.png").convert_alpha(), (40, 40))
-    
+
     remote_players = {}
     # Loot pool (מאגר פריטים)
 
@@ -561,7 +566,7 @@ def main():
     hp_items = []
     # print("Loot spawned:", len(loot_items))
     # print("First loot at:", loot_items[0].x, loot_items[0].y)
-    bullets = {} #bullet id -> {x,y,angle}
+    bullets = {} #bullet id -> {x,y,angle,type}
     server_fps = 0
 
     running = True
@@ -701,11 +706,11 @@ def main():
                         pygame.quit();exit()
 
             elif parts[0] == "SHOW-BULLET":
-                if len(parts) < 4:
+                if len(parts) < 5:
                     continue
                 bullet_x = parts[1].split(',')[0]
                 bullet_y = parts[1].split(',')[1]
-                bullets[parts[3]] = {"x": bullet_x, "y": bullet_y ,"angle": parts[2]}
+                bullets[parts[3]] = {"x": bullet_x, "y": bullet_y ,"angle": parts[2], "type": parts[4]}
 
             elif parts[0] == "DEL-BULLET":
                 if len(parts) < 2:
@@ -816,7 +821,7 @@ def main():
             bullet_y = float(bullets[i]["y"])
             bullet_angle = float(bullets[i]["angle"])
 
-            draw_bullet(screen, bullet_img, bullet_x, bullet_y, bullet_angle, camera_x, camera_y)
+            draw_bullet(screen, bullet_img if bullets[i]["type"] != "knife" else weapon_images["knife"], bullet_x, bullet_y, bullet_angle, camera_x, camera_y)
 
             new_x, new_y = get_next_bullet_position(bullet_x, bullet_y, bullet_angle)
             bullets[i]["x"] = new_x

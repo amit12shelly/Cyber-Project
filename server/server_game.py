@@ -22,7 +22,7 @@ SCREEN_HEIGHT = 1080
 MAX_WEAPONS = 9000
 AMOUNT_TO_DROP_IN_DEATH = 2
 ENTITIES_SPEED = 4
-WEAPON_LIST = [["gun", 20, TILE_SIZE * 10],["rifle" ,10 , TILE_SIZE * 20],["rpg",30,TILE_SIZE*25]] #-> name,damage,range
+WEAPON_LIST = [["gun", 20, TILE_SIZE * 10],["rifle" ,10 , TILE_SIZE * 20],["rpg",30,TILE_SIZE*25], ["knife", 35, 5]] #-> name,damage,range
 WEAPON_NAMES = [w[0] for w in WEAPON_LIST]
 WEAPON_DAMAGE = [w[1] for w in WEAPON_LIST]
 WEAPON_RANGE = [w[2] for w in WEAPON_LIST]
@@ -273,7 +273,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             if found_potion_id is not None:  # if its real
                 pos_str = f"{state.map_potion[found_potion_id]['x']},{state.map_potion[found_potion_id]['y']}"
                 self.broadcast_undrop(pos_str, "potion")
-                self.broadcast_player(client_id, state.players_pos[client_id], state.players_hp[client_id])
+                self.broadcast_player(client_id, state.players_pos[client_id], state.players_hp[client_id], False)
                 del state.map_potion[found_potion_id]
             else:  # this weapon does not exist
                 self.disconnect()  # kick the player
@@ -384,8 +384,8 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             client._quic.send_stream_data(client.stream_id, msg, end_stream=False)
             client.transmit()
 
-    def broadcast_show_bullet(self, pos: str ,angle: str, bullet_id: str):
-        msg = f"SHOW-BULLET|{pos}|{angle}|{bullet_id}\n".encode()
+    def broadcast_show_bullet(self, pos: str ,angle: str, bullet_id: str, gun_type: str):
+        msg = f"SHOW-BULLET|{pos}|{angle}|{bullet_id}|{"knife" if gun_type == "knife" else "bullet'"}\n".encode()
         for client in list(state.active_clients):
             if client.stream_id is None:
                 continue
@@ -451,7 +451,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 gun_damage = int(WEAPON_DAMAGE[i])
                 gun_range = int(WEAPON_RANGE[i])
         pos = f"{x},{y}"
-        self.broadcast_show_bullet(pos , angle , str(bullet_id))
+        self.broadcast_show_bullet(pos , angle , str(bullet_id), gun_type)
         for _ in range(gun_range):
             x, y = get_next_bullet_position(x, y, angle)
             state.active_bullets[bullet_id]["x"] = x
