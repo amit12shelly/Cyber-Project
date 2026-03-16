@@ -24,11 +24,10 @@ SCREEN_HEIGHT = 1080
 MAX_WEAPONS = 9000
 AMOUNT_TO_DROP_IN_DEATH = 2
 ENTITIES_SPEED = 4
-WEAPON_LIST = [["gun", 30, TILE_SIZE * 10, 10],["rifle" ,15 , TILE_SIZE * 20, 30],["rpg",50,TILE_SIZE*25, 5]] #-> name,damage,range,ammo
+WEAPON_LIST = [["gun", 20, TILE_SIZE * 10],["rifle" ,10 , TILE_SIZE * 20],["rpg",30,TILE_SIZE*25]] #-> name,damage,range
 WEAPON_NAMES = [w[0] for w in WEAPON_LIST]
 WEAPON_DAMAGE = [w[1] for w in WEAPON_LIST]
 WEAPON_RANGE = [w[2] for w in WEAPON_LIST]
-WEAPON_AMMO = [w[3] for w in WEAPON_LIST]
 MONSTER_CHANGE_PATH_EVERY_SET_SECONDS = 3
 MONSTER_ACCURACY = 65  # 1-100
 MAX_POTION = 9000
@@ -43,32 +42,11 @@ def load_map():
     return [list(line.strip()) for line in lines]
 
 
-# ---------- Inventory helpers ---------- #
-
-def make_weapon_slot(weapon_name):
-    """Create an inventory slot dict for a weapon with full ammo."""
-    idx = WEAPON_NAMES.index(weapon_name)
-    return {"type": weapon_name, "ammo": WEAPON_AMMO[idx]}
-
-def slot_type(slot):
-    """Return the weapon name from a slot (dict or legacy string)."""
-    if isinstance(slot, dict):
-        return slot["type"]
-    return slot  # "none" or legacy string
-
-def slot_ammo(slot):
-    """Return ammo count from a slot dict, or None if slot is 'none'."""
-    if isinstance(slot, dict):
-        return slot["ammo"]
-    return None
-
-
 class GameState:
     #player info
     players_pos = {}  # client_id -> "x,y"
     players_hp = {}  # client_id -> hp
-    # inventory slot: "none"  OR  {"type": "gun", "ammo": 30}
-    players_inventory = {}  # client_id -> {slot 0..4: "none" | dict}
+    players_inventory = {}  # client_id -> {slot 1, slot 2, slot 3 ,slot 4 ,slot 5}
     active_clients = set()  # set of EchoQuicProtocol
     active_bullets = {}  # bullet_id -> {x, y, angle}
     players_potions ={}
@@ -123,10 +101,10 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
             if len(parts) < 3:
                 state.players_pos[client_id] = "0,0"
-                state.players_hp[client_id] = 100
+                state.players_hp[client_id] = "100"
             else:
                 state.players_pos[client_id] = parts[1]
-                state.players_hp[client_id] = int(parts[2])
+                state.players_hp[client_id] = parts[2]
 
             state.players_inventory[client_id] = {int(i): "none" for i in range(INVENTORY_SIZE)}
             state.players_potions[client_id] = 0
@@ -198,27 +176,9 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 return
             if len(parts) < 3:
                 return
-            weapon_slot = int(parts[1])
-            slot = state.players_inventory[client_id][weapon_slot]
-            weapon = slot_type(slot)
-
+            weapon_slot = parts[1]
+            weapon = state.players_inventory[client_id][int(weapon_slot)]
             if weapon in WEAPON_NAMES:
-                # --- decrement ammo ---
-                if not isinstance(slot, dict):
-                    # legacy slot with no ammo tracking: convert it
-                    slot = make_weapon_slot(weapon)
-                    state.players_inventory[client_id][weapon_slot] = slot
-
-                slot["ammo"] -= 1
-                remaining = slot["ammo"]
-
-                # notify client of new ammo count
-                ammo_msg = f"AMMO|{weapon_slot}|{remaining}\n".encode()
-                if self.stream_id is not None:
-                    self._quic.send_stream_data(self.stream_id, ammo_msg, end_stream=False)
-                    self.transmit()
-
-                # fire the bullet
                 new_id = random.randint(1, MAX_BULLETS)
                 while new_id in state.active_bullets:
                     new_id = random.randint(1, MAX_BULLETS)
@@ -242,21 +202,6 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
                 print("shooting!")
                 asyncio.create_task(self.gun_tracking(new_id, weapon))
-
-                # --- remove weapon if out of ammo ---
-                if remaining <= 0:
-                    # shift inventory left (same logic as DROP)
-                    client_hex = self._quic.host_cid.hex()
-                    for i in range(weapon_slot, INVENTORY_SIZE - 1):
-                        state.players_inventory[client_hex][i] = state.players_inventory[client_hex][i + 1]
-                    state.players_inventory[client_hex][INVENTORY_SIZE - 1] = "none"
-
-                    # tell client the weapon is gone
-                    noammo_msg = f"NOAMMO|{weapon_slot}\n".encode()
-                    if self.stream_id is not None:
-                        self._quic.send_stream_data(self.stream_id, noammo_msg, end_stream=False)
-                        self.transmit()
-                    print(f"Weapon {weapon} in slot {weapon_slot} ran out of ammo and was removed.")
 
 
         elif data_str.startswith("PICKUP|"):
@@ -287,10 +232,11 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                             break
 
                 if found_weapon_id is not None:  # if its real
+
                     for slot in range(INVENTORY_SIZE):
+
                         if state.players_inventory[self._quic.host_cid.hex()][slot] == "none":
-                            # Store as dict with full ammo
-                            state.players_inventory[self._quic.host_cid.hex()][slot] = make_weapon_slot(pickup_type)
+                            state.players_inventory[self._quic.host_cid.hex()][slot] = pickup_type
                             pos_str = f"{state.map_weapons[found_weapon_id]['x']},{state.map_weapons[found_weapon_id]['y']}"
                             self.broadcast_undrop(pos_str, state.map_weapons[found_weapon_id]["type"])
                             del state.map_weapons[found_weapon_id]
@@ -329,6 +275,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                             print("sup dog up the hp")
                             client_id = self._quic.host_cid.hex()
                             state.players_potions[client_id] += 1
+                            # state.players_hp[client_id] = pickup_hp
                             found_potion_id = p_id
                             break
             if found_potion_id is not None:  # if its real
@@ -371,15 +318,19 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
                 self.broadcast_poison(poison_x, poison_y)
 
-                for p_id, p_pos in state.players_pos.items():
-                    if p_id != client_id:
-                        px,py=map(float,p_pos.split(","))
+                async def poison_effect():
+                    for _ in range(5):  # חמש פעמים, למשל 5 שניות בסך הכל
+                        for p_id, p_pos in state.players_pos.items():
+                            if p_id != client_id:
+                                px, py = map(float, p_pos.split(","))
+                                dx = px - poison_x
+                                dy = py - poison_y
+                                distance = (dx ** 2 + dy ** 2) ** 0.5
+                                if distance <= RADIUS:
+                                    self.damage(p_id, 5)
+                        await asyncio.sleep(0.5)
 
-                        dx = px - poison_x
-                        dy = py - poison_y
-                        distance = (dx**2 + dy**2) ** 0.5
-                        if distance <= RADIUS:
-                            self.damage(p_id,5)
+                asyncio.create_task(poison_effect())  # מריצים את זה ברקע
 
             else:  # this weapon does not exist
                 self.disconnect()  # kick the player
@@ -403,34 +354,37 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 print("Error while splitting the pos in the DROP command!")
                 return
             weapon_slot = int(parts[2])
-            slot = state.players_inventory[self._quic.host_cid.hex()][weapon_slot]
-            drop = slot_type(slot)
-
+            drop = state.players_inventory[self._quic.host_cid.hex()][weapon_slot]
             if drop in WEAPON_NAMES:
+
                 if drop != "none":  # if he has something to drop
                     client_hex = self._quic.host_cid.hex()
 
+                    # 1. במקום סתם לרוקן את הסלוט, מזיזים את כל הנשקים שאחריו מקום אחד שמאלה (כדי לסנכרן עם ה-pop בקליינט)
                     for i in range(weapon_slot, INVENTORY_SIZE - 1):
                         state.players_inventory[client_hex][i] = state.players_inventory[client_hex][i + 1]
+
+                    # 2. מרוקנים את הסלוט האחרון לגמרי
                     state.players_inventory[client_hex][INVENTORY_SIZE - 1] = "none"
 
                     new_id = random.randint(1, 1000000)
                     while new_id in state.map_weapons:
                         new_id = random.randint(1, 1000000)
 
-                    state.map_weapons[new_id] = {
+                    state.map_weapons[new_id] = {  # drop this weapon
                         "x": float(x_str),
                         "y": float(y_str),
                         "type": drop,
                     }
+                    # tell everyone about this drop
                     self.broadcast_drop(pos_str, drop, False)
 
-                else:
-                    self.disconnect()
+                else:  # he wants to drop something that he doesn't have
+                    self.disconnect()  # kick the player
                     print("player has been kicked! player does not have this weapon")
 
-            else:
-                self.disconnect()
+            else:  # he wants to drop something that the server don't recognize
+                self.disconnect()  # kick the player
                 print("player has been kicked! the server dont recognize this weapon")
 
 
@@ -571,14 +525,16 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             state.active_bullets[bullet_id]["y"] = y
 
             pos = f"{x},{y}"
-            if not check_if_in_map(x, y):
+            if not check_if_in_map(x, y):  #checks if the bullet got out of the map
                 del state.active_bullets[bullet_id]
                 self.broadcast_del_bullet(str(bullet_id))
                 return
-            if state.game_map[int(y / TILE_SIZE)][int(x / TILE_SIZE)] == "#":
+            if state.game_map[int(y / TILE_SIZE)][int(x / TILE_SIZE)] == "#":  #checks if the bullet got into wall
                 del state.active_bullets[bullet_id]
                 self.broadcast_del_bullet(str(bullet_id))
                 return
+
+
 
             for player_id, pos_str in list(state.players_pos.items()):
                 try:
@@ -592,6 +548,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                         self.broadcast_del_bullet(str(bullet_id))
                         self.damage(player_id, gun_damage)
                         return
+
 
             for monster in monsters_list:
                 try:
@@ -619,8 +576,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             dropped = 0
             inv_slot = 0
             while dropped < AMOUNT_TO_DROP_IN_DEATH and inv_slot < INVENTORY_SIZE:
-                slot = state.players_inventory[client_id].get(inv_slot)
-                item = slot_type(slot)
+                item = state.players_inventory[client_id].get(inv_slot)
                 if item != "none":
                     new_id = random.randint(1, 1000000)
                     while new_id in state.map_weapons:
@@ -678,11 +634,12 @@ class Monster:
         self.nearest_player = find_nearest_player(self.x, self.y)
 
         if self.nearest_player:
-            self.path = A_star_algorythm((self.x, self.y), self.nearest_player, self.weapon[2])
+            self.path = A_star_algorythm((self.x, self.y), self.nearest_player, TILE_SIZE)
         else:
             self.path = None
 
         self.last_path_time = time.time()
+        # מונע מצב שכל המפלצות יורות באותה אלפית שנייה כשהן נוצרות
         self.last_shot_time = time.time() - random.uniform(0, 2)
 
     def take_damage(self, damage):
@@ -714,13 +671,14 @@ class Monster:
             self.nearest_player = find_nearest_player(self.x, self.y)
 
             if self.nearest_player:
-                self.path = A_star_algorythm((self.x, self.y), self.nearest_player, self.weapon[2])
+                self.path = A_star_algorythm((self.x, self.y), self.nearest_player, TILE_SIZE)
             else:
                 self.path = None
 
             self.last_path_time = time.time()
             self.last_shot_time = time.time()
 
+            #drop 2 items when monster die
             for i in range(1):
                 item = random.choice(POTION_LIST)
                 new_id = random.randint(1, int(MAX_POTION))
@@ -750,6 +708,7 @@ async def monster_gun_tracking(bullet_id: int, gun_type: str, start_x: float, st
     y = start_y
     pos = f"{x},{y}"
 
+    # משדרים לכולם שנוצר כדור חדש
     msg_show = f"SHOW-BULLET|{pos}|{angle}|{bullet_id}\n".encode()
     for client in list(state.active_clients):
         if client.stream_id is not None:
@@ -762,6 +721,7 @@ async def monster_gun_tracking(bullet_id: int, gun_type: str, start_x: float, st
             state.active_bullets[bullet_id]["x"] = x
             state.active_bullets[bullet_id]["y"] = y
 
+        # עצירה כשהכדור פוגע בקיר או יוצא מהמפה
         if not check_if_in_map(x, y):
             break
         if state.game_map[int(y / TILE_SIZE)][int(x / TILE_SIZE)] == "#":
@@ -769,6 +729,7 @@ async def monster_gun_tracking(bullet_id: int, gun_type: str, start_x: float, st
 
         hit_player = False
 
+        # בדיקת פגיעה בשחקנים
         for player_id, pos_str in list(state.players_pos.items()):
             try:
                 px, py = map(float, pos_str.split(","))
@@ -777,6 +738,7 @@ async def monster_gun_tracking(bullet_id: int, gun_type: str, start_x: float, st
 
             if abs(px - x) <= TOLERANCE and abs(py - y) <= TOLERANCE:
                 hit_player = True
+                # מחפשים את החיבור של השחקן כדי להוריד לו חיים בעזרת מערכת הנזק הקיימת
                 for client in list(state.active_clients):
                     if client._quic.host_cid.hex() == player_id:
                         client.damage(player_id, gun_damage)
@@ -788,6 +750,7 @@ async def monster_gun_tracking(bullet_id: int, gun_type: str, start_x: float, st
 
         await asyncio.sleep(BULLETS_MOVE_TIME)
 
+    # מוחקים את הכדור מהרשימה ומשדרים מחיקה לכולם
     if bullet_id in state.active_bullets:
         del state.active_bullets[bullet_id]
 
@@ -825,10 +788,12 @@ def check_if_in_map(x, y):
     elif x < 0:
         return False
 
+
     return True
 
 
 def find_nearest_player(monster_x, monster_y):
+    # אם אין שחקנים מחוברים, אין את מי לחפש
     if not state.players_pos:
         return None
 
@@ -842,6 +807,7 @@ def find_nearest_player(monster_x, monster_y):
         except:
             continue
 
+        # חישוב מרחק מהמפלצת (ולא מ-0,0)
         dist = (player_x - monster_x) ** 2 + (player_y - monster_y) ** 2
 
         if dist < min_dist:
@@ -851,6 +817,7 @@ def find_nearest_player(monster_x, monster_y):
     return closest_player
 
 def check_if_in_map_for_monster(x, y):
+    """Return True if monster's position is inside map bounds."""
     x_tile = int(x / TILE_SIZE)
     y_tile = int(y / TILE_SIZE)
     return 0 <= y_tile < len(state.game_map) and 0 <= x_tile < len(state.game_map[0])
@@ -858,34 +825,44 @@ def check_if_in_map_for_monster(x, y):
 
 
 def A_star_algorythm(start, target, desired_range):
+    # OPEN //the set of nodes to be evaluated
     open_heap = []
-    open_dict = {}
+    open_dict = {}  # Keeps track of the best g_cost for nodes in OPEN: { (x,y): g_cost }
 
+    # CLOSED //the set of nodes already evaluated
     closed_set = set()
 
     start_h = pitagoras(target[0] - start[0], target[1] - start[1])
+    # Node data structure: (x, y, g_cost, h_cost, f_cost)
     start_node = Node((start[0], start[1], 0, start_h, start_h))
 
+    # add the start node to OPEN
     heapq.heappush(open_heap, (start_node.data[4], next(counter), start_node))
     open_dict[(start[0], start[1])] = 0
 
     iterations = 0
     MAX_ITERATIONS = 400
 
+    # loop
     while open_heap and iterations < MAX_ITERATIONS:
         iterations += 1
+        # current = node in OPEN with the lowest f_cost
         _, _, current_node = heapq.heappop(open_heap)
         cx, cy, cg = current_node.data[0], current_node.data[1], current_node.data[2]
 
+        # remove current from OPEN
         if (cx, cy) in closed_set:
             continue
 
+        # add current to CLOSED
         closed_set.add((cx, cy))
 
+        # התיקון הקריטי: desired_range מגיע כבר בפיקסלים מהנשק, אז לא צריך להכפיל שוב
         if current_node.data[3] <= desired_range:
             path = reverse_node_chain(current_node)
             return path.next if path and path.next else current_node
 
+        # foreach neighbour of the current node
         for dx in [-TILE_SIZE, 0, TILE_SIZE]:
             for dy in [-TILE_SIZE, 0, TILE_SIZE]:
                 if dx == 0 and dy == 0:
@@ -893,6 +870,7 @@ def A_star_algorythm(start, target, desired_range):
 
                 nx, ny = cx + dx, cy + dy
 
+                # if neighbour is not traversable or neighbour is in CLOSED
                 if not check_if_in_map_for_monster(nx, ny):
                     continue
                 row, col = int(ny / TILE_SIZE), int(nx / TILE_SIZE)
@@ -901,11 +879,13 @@ def A_star_algorythm(start, target, desired_range):
                 if (nx, ny) in closed_set:
                     continue
 
+                # Calculate distances and costs
                 step_cost = pitagoras(dx, dy)
                 new_g = cg + step_cost
                 h_cost = pitagoras(target[0] - nx, target[1] - ny)
                 new_f = new_g + h_cost
 
+                # if new path to neighbour is shorter OR neighbour is not in OPEN
                 if (nx, ny) not in open_dict or new_g < open_dict[(nx, ny)]:
                     open_dict[(nx, ny)] = new_g
 
@@ -963,6 +943,9 @@ def spawn_random_monsters(amount):
 
 
 def spawn_loot_per_camera_zone(game_map, per_zone=2):
+    """
+    Spawn loot so that each camera-sized zone has at least per_zone items.
+    """
     loot_list = []
 
     tiles_wide = len(game_map[0])
@@ -980,11 +963,12 @@ def spawn_loot_per_camera_zone(game_map, per_zone=2):
                 tile_x = random.randint(win_x, min(win_x + zone_tiles_x - 1, tiles_wide - 1))
                 tile_y = random.randint(win_y, min(win_y + zone_tiles_y - 1, tiles_high - 1))
 
-                if game_map[tile_y][tile_x] != "#":
+                if game_map[tile_y][tile_x] != "#":  # רק על רצפה
                     x = tile_x * TILE_SIZE
                     y = tile_y * TILE_SIZE
                     name = random.choice(WEAPON_NAMES)
                     loot_list.append((x, y, name))
+                    #create an unic id
                     new_id = random.randint(1, int(MAX_WEAPONS))
                     while new_id in state.map_weapons:
                         new_id = random.randint(1, int(MAX_WEAPONS))
@@ -997,6 +981,10 @@ def spawn_loot_per_camera_zone(game_map, per_zone=2):
                     spawned += 1
 
 def spawn_potions_per_camera_zone(game_map, per_zone=2):
+    """
+    Spawn items so that each camera-sized zone has at least `per_zone` items.
+    מוסיף ישר ל-state.map_items עם ID ייחודי ומיקום.
+    """
     tiles_wide = len(game_map[0])
     tiles_high = len(game_map)
 
@@ -1012,15 +1000,18 @@ def spawn_potions_per_camera_zone(game_map, per_zone=2):
                 tile_x = random.randint(win_x, min(win_x + zone_tiles_x - 1, tiles_wide - 1))
                 tile_y = random.randint(win_y, min(win_y + zone_tiles_y - 1, tiles_high - 1))
 
+                # רק על רצפה
                 if game_map[tile_y][tile_x] != "#":
                     x = tile_x * TILE_SIZE
                     y = tile_y * TILE_SIZE
 
+                    # צור מזהה ייחודי
                     new_id = random.randint(1, int(MAX_POTION))
                     while new_id in state.map_potion:
                         new_id = random.randint(1, int(MAX_POTION))
 
                     item = POTION_LIST[0]
+                    # הכנס למפה
                     state.map_potion[new_id] = {
                         "x": x,
                         "y": y,
@@ -1028,17 +1019,14 @@ def spawn_potions_per_camera_zone(game_map, per_zone=2):
                     }
 
                     spawned += 1
-
 async def monsters_manager():
+    """Continuously update monsters' positions efficiently and handle shooting."""
     global monsters_list
     if not monsters_list:
         return
 
-    MAX_ASTAR_PER_TICK = 50  # cap how many A* calls happen per 0.5s tick
-
     while True:
         now = time.time()
-        astar_calls_this_tick = 0
 
         for i, monster in enumerate(monsters_list):
             if monster is None:
@@ -1052,19 +1040,24 @@ async def monsters_manager():
 
             dist_to_player = pitagoras(monster.x - monster.nearest_player[0], monster.y - monster.nearest_player[1])
 
-            # use max weapon range as the activation distance so all weapon types work
-            activation_dist = max(monster.weapon[2], 1500)
-            if dist_to_player > activation_dist:
+            if dist_to_player > 1500:
                 monster.path = None
                 continue
 
+            # --- הגיון הלחימה של המפלצת ---
+            # אם השחקן בטווח הנשק של המפלצת
             if dist_to_player <= monster.weapon[2]:
 
+                # המפלצת יורה רק כל 3.5 עד 5.5 שניות (זמן אקראי)
                 if now - monster.last_shot_time >= random.uniform(3.5, 5.5):
 
+                    # מחשבים את הזווית המדויקת אל השחקן
                     angle = math.degrees(
                         math.atan2(monster.nearest_player[1] - monster.y, monster.nearest_player[0] - monster.x))
 
+                    # --- יישום הדיוק לפי המשתנה הגלובלי ---
+                    # מחשבים את זווית הסטייה המקסימלית:
+                    # אם הדיוק הוא 100, הסטייה היא 0. אם הדיוק 65, הסטייה היא 14 מעלות.
                     max_deviation = (100 - MONSTER_ACCURACY) * 0.4
                     angle += random.uniform(-max_deviation, max_deviation)
 
@@ -1078,25 +1071,25 @@ async def monsters_manager():
                         "angle": angle,
                     }
 
+                    # משגרים את הכדור
                     asyncio.create_task(monster_gun_tracking(new_id, monster.weapon[0], monster.x, monster.y, angle))
                     monster.last_shot_time = now
 
-            needs_new_path = (
-                monster.path is None
-                or now - monster.last_path_time >= MONSTER_CHANGE_PATH_EVERY_SET_SECONDS
-            )
-            if needs_new_path and astar_calls_this_tick < MAX_ASTAR_PER_TICK:
-                new_path = A_star_algorythm((monster.x, monster.y), monster.nearest_player, monster.weapon[2])
+            # --- הגיון התזוזה של המפלצת ---
+            if (
+                    monster.path is None
+                    or now - monster.last_path_time >= MONSTER_CHANGE_PATH_EVERY_SET_SECONDS
+            ):
+                new_path = A_star_algorythm((monster.x, monster.y), monster.nearest_player, TILE_SIZE)
                 monster.path = new_path
                 monster.last_path_time = now
-                astar_calls_this_tick += 1
 
             if monster.path:
                 monster.x = monster.path.data[0]
                 monster.y = monster.path.data[1]
                 monster.path = monster.path.next
 
-            if i % 20 == 0:   # yield more often to keep event loop responsive
+            if i % 50 == 0:
                 await asyncio.sleep(0)
 
         broadcast_visible_monsters()
@@ -1124,13 +1117,15 @@ def broadcast_visible_monsters():
             if monster is None:
                 continue
 
+            # בודקים אם המפלצת נמצאת בתוך טווח המצלמה של השחקן הזה
             if abs(monster.x - px) <= half_width and abs(monster.y - py) <= half_height:
                 client_monster_msg += f"|{monster.x},{monster.y},{monster.hp}"
 
+        # שולחים רק למחשב הספציפי הזה.
+        # (אם אין מפלצות סביבו, הוא יקבל "MONSTERS" נקי, מה שיאמר לקליינט למחוק מפלצות מהמסך)
         msg = f"MONSTERS{client_monster_msg}\n".encode()
         client._quic.send_stream_data(client.stream_id, msg, end_stream=False)
         client.transmit()
-
 # ---------- Server entry ---------- #
 
 async def check_cpu():
