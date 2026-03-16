@@ -16,6 +16,7 @@ UP_HP = 40
 MAX_BULLETS = 1000
 TILE_SIZE = 64
 TOLERANCE = 70
+RADIUS = 300
 BULLETS_MOVE_TIME = 0.01
 MONSTERS_AMOUNT = 3500
 SCREEN_WIDTH = 1920
@@ -303,12 +304,30 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             if state.players_potions[client_id] <= 0:
                 return
             if item_name =="Potion":
-                print("NIgga")
                 state.players_hp[client_id] += UP_HP
 
                 if state.players_hp[client_id] > 100:
                     state.players_hp[client_id] = 100
                 self.broadcast_player(client_id,state.players_pos[client_id],state.players_hp[client_id],True)
+            elif item_name == "Poison":
+                if len(parts) < 3:
+                    return
+
+                pos = parts[2]
+                poison_x,poison_y = map(float,pos.split(","))
+
+                self.broadcast_poison(poison_x, poison_y)
+
+                for p_id, p_pos in state.players_pos.items():
+                    if p_id != client_id:
+                        px,py=map(float,p_pos.split(","))
+
+                        dx = px - poison_x
+                        dy = py - poison_y
+                        distance = (dx**2 + dy**2) ** 0.5
+                        if distance <= RADIUS:
+                            self.damage(p_id,5)
+
             else:  # this weapon does not exist
                 self.disconnect()  # kick the player
                 print("player has been kicked! item name = none")
@@ -428,6 +447,14 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
     def broadcast_del_bullet(self, id: str):
         msg = f"DEL-BULLET|{id}\n".encode()
+        for client in list(state.active_clients):
+            if client.stream_id is None:
+                continue
+            client._quic.send_stream_data(client.stream_id, msg, end_stream=False)
+            client.transmit()
+
+    def broadcast_poison(self, x, y):
+        msg = f"POISON|{x},{y}\n".encode()
         for client in list(state.active_clients):
             if client.stream_id is None:
                 continue

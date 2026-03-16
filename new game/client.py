@@ -229,6 +229,62 @@ def get_nearby_item(player, loot_items, radius=70):
         if distance <= radius:
             return item
     return None
+
+# ---------------- PoisonEffect CLASS ---------------- #
+class PoisonEffect:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+        self.particles = []
+
+        for _ in range(120):
+
+            angle = random.uniform(0, math.pi * 2)
+            dist = random.uniform(0, 10)
+
+            self.particles.append({
+                "x": x + math.cos(angle) * dist,
+                "y": y + math.sin(angle) * dist,
+                "vx": random.uniform(-0.6, 0.6),
+                "vy": random.uniform(-0.8, -0.2),
+                "size": random.randint(10, 24),
+                "life": random.randint(70, 110)
+            })
+
+    def update(self):
+
+        for p in self.particles:
+
+            p["x"] += p["vx"]
+            p["y"] += p["vy"]
+
+            p["vx"] *= 0.98
+            p["vy"] *= 0.98
+
+            p["size"] += 0.15
+            p["life"] -= 1
+
+        self.particles = [p for p in self.particles if p["life"] > 0]
+
+    def draw(self, screen, camera_x, camera_y):
+
+        for p in self.particles:
+
+            alpha = int(180 * (p["life"] / 110))
+
+            surf = pygame.Surface((int(p["size"]*2), int(p["size"]*2)), pygame.SRCALPHA)
+
+            pygame.draw.circle(
+                surf,
+                (140, 0, 190, alpha),
+                (int(p["size"]), int(p["size"])),
+                int(p["size"])
+            )
+
+            screen.blit(
+                surf,
+                (p["x"] - camera_x - p["size"], p["y"] - camera_y - p["size"])
+            )
 # ---------------- Item CLASS ---------------- #
 class Item:
     def __init__(self, x, y, image, item_type, name):
@@ -603,6 +659,7 @@ def main():
 
     # loot_items = spawn_loot_per_camera_zone(game_map, tile_size, loot_pool, screen.get_width(), screen.get_height(),per_zone=1)
     loot_items = []
+    poison_effects = []
     monsters=[]
     inventory = []
     hp_items = []
@@ -661,12 +718,16 @@ def main():
                         print("Picked potion")
 
                 if event.key == pygame.K_x:
-                    if len(inventory) > 0 and player.hp < 100:
+                    if len(inventory) > 0:
                         item = inventory.pop(0)# take the first on the inventory
-                        player.hp += UP_HP
-                        if player.hp > 100:
-                            player.hp = 100
-                        outgoing_messages.put(f"USE|{item.name}")
+                        if item.name == "Potion":
+                            player.hp += UP_HP
+                            if player.hp > 100:
+                                player.hp = 100
+                            outgoing_messages.put(f"USE|{item.name}")
+
+                        elif item.name == "Poison":
+                            outgoing_messages.put(f"USE|{item.name}|{player.x+32},{player.y+32}")
 
                 if event.key == pygame.K_q:
                     slot_to_drop = player.selected_slot
@@ -847,6 +908,11 @@ def main():
                     y_potion = float(y_potion)
 
                     hp_items.append(Potion(x_potion,y_potion,potion_img,"Potion"))
+            elif parts[0] == "POISON":
+                pos = parts[1]
+                x,y = map(float,pos.split(","))
+
+                poison_effects.append(PoisonEffect(x, y))
 
             elif parts[0] == "ITEMS":
                 if len(parts) < 3:
@@ -882,6 +948,12 @@ def main():
                 monster.draw(screen, camera_x, camera_y)
         for hp_item in hp_items:
             hp_item.draw(screen, camera_x, camera_y)
+
+        for effect in poison_effects:
+            effect.update()
+            effect.draw(screen, camera_x, camera_y)
+
+        poison_effects = [e for e in poison_effects if len(e.particles) > 0]
 
         # calculate the bullets movements and show them
         for i in bullets:
