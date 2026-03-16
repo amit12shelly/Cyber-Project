@@ -11,6 +11,7 @@ from aioquic.quic.configuration import QuicConfiguration
 SERVER_IP = "127.0.0.1"
 SERVER_PORT = 4433
 TOLERANCE = 5
+UP_HP = 40
 MY_ID = ""
 incoming_messages = Queue()
 outgoing_messages = Queue()
@@ -124,35 +125,78 @@ def collides_with_wall(game_map, x, y, size, tile_size):
 
     return False
 
-# def spawn_loot_per_camera_zone(game_map, tile_size, loot_pool, screen_width, screen_height, per_zone=2):
-#     """
-#     Spawn loot so that each camera-sized zone has at least `per_zone` items.
-#     """
-#     loot_list = []
-#
-#     tiles_wide = len(game_map[0])
-#     tiles_high = len(game_map)
-#
-#     zone_tiles_x = screen_width // tile_size
-#     zone_tiles_y = screen_height // tile_size
-#
-#     for win_y in range(0, tiles_high, zone_tiles_y):
-#         for win_x in range(0, tiles_wide, zone_tiles_x):
-#             spawned = 0
-#             attempts = 0
-#             while spawned < per_zone and attempts < 50:
-#                 attempts += 1
-#                 tile_x = random.randint(win_x, min(win_x + zone_tiles_x - 1, tiles_wide - 1))
-#                 tile_y = random.randint(win_y, min(win_y + zone_tiles_y - 1, tiles_high - 1))
-#
-#                 if game_map[tile_y][tile_x] != "#":  # רק על רצפה
-#                     x = tile_x * tile_size
-#                     y = tile_y * tile_size
-#                     item_type, name, image = random.choice(loot_pool)
-#                     loot_list.append(Item(x, y, image, item_type, name))
-#                     spawned += 1
-#
-#     return loot_list
+def draw_big_inventory(screen, player, potions, font):
+    width = 800
+    height = 500
+
+    x = (screen.get_width() - width) // 2
+    y = (screen.get_height() - height) // 2
+
+    # background
+    panel = pygame.Surface((width, height), pygame.SRCALPHA)
+    panel.fill((0, 0, 0, 200))
+    screen.blit(panel, (x, y))
+
+    pygame.draw.rect(screen, (150,150,150), (x,y,width,height), 2)
+
+    # ---------- PLAYER ----------
+    title = font.render("PLAYER", True, (255,255,255))
+    screen.blit(title, (x+20, y+20))
+
+    sprite_size = 120
+    if player.has_weapon_equipped():
+        sprite = player.weapon_sprites[player.direction]
+    else:
+        sprite = player.base_sprites[player.direction]
+    sprite = pygame.transform.scale(sprite,(sprite_size,sprite_size))
+    screen.blit(sprite,(x+20,y+60))
+
+    # ---------- HP ----------
+    bar_width = 200
+    hp_ratio = player.hp / 100
+    hp_x = x+180
+    hp_y = y+90
+    pygame.draw.rect(screen,(100,0,0),(hp_x,hp_y,bar_width,20))
+    pygame.draw.rect(screen,(0,255,0),(hp_x,hp_y,bar_width*hp_ratio,20))
+    hp_text = font.render(f"HP {player.hp}/100",True,(255,255,255))
+    screen.blit(hp_text,(hp_x,hp_y-25))
+
+    # ---------- WEAPONS ----------
+    title = font.render("WEAPONS", True, (255,255,255))
+    screen.blit(title, (x+20, y+220))
+
+    slot_size = 70
+    for i in range(5):
+        slot_x = x + 20 + i*(slot_size+10)
+        slot_y = y + 260
+        pygame.draw.rect(screen,(60,60,60),(slot_x,slot_y,slot_size,slot_size))
+
+        if i < len(player.inventory):
+            weapon = player.inventory[i]
+            img = pygame.transform.scale(weapon.image,(slot_size,slot_size))
+            screen.blit(img,(slot_x,slot_y))
+
+        if i == player.selected_slot:
+            pygame.draw.rect(screen,(255,255,0),(slot_x,slot_y,slot_size,slot_size),3)
+
+    # ---------- ITEMS ----------
+    title = font.render("ITEMS", True, (255,255,255))
+    screen.blit(title, (x+20, y+360))
+
+    item_size = 60
+    max_slots = 6  # ניצור 6 slots
+    for i in range(max_slots):
+        draw_x = x + 20 + i*(item_size+10)
+        draw_y = y + 400
+
+        # רקע אפור לכל slot
+        pygame.draw.rect(screen,(60,60,60),(draw_x,draw_y,item_size,item_size))
+
+        # אם יש פריט, נשים אותו בתוך ה-slot
+        if i < len(potions):
+            item = potions[i]
+            img = pygame.transform.scale(item.image,(item_size,item_size))
+            screen.blit(img,(draw_x,draw_y))
 
 def draw_inventory(screen, player):
     slot_size = 64
@@ -185,6 +229,62 @@ def get_nearby_item(player, loot_items, radius=70):
         if distance <= radius:
             return item
     return None
+
+# ---------------- PoisonEffect CLASS ---------------- #
+class PoisonEffect:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+        self.particles = []
+
+        for _ in range(120):
+
+            angle = random.uniform(0, math.pi * 2)
+            dist = random.uniform(0, 10)
+
+            self.particles.append({
+                "x": x + math.cos(angle) * dist,
+                "y": y + math.sin(angle) * dist,
+                "vx": random.uniform(-0.6, 0.6),
+                "vy": random.uniform(-0.8, -0.2),
+                "size": random.randint(10, 24),
+                "life": random.randint(70, 110)
+            })
+
+    def update(self):
+
+        for p in self.particles:
+
+            p["x"] += p["vx"]
+            p["y"] += p["vy"]
+
+            p["vx"] *= 0.98
+            p["vy"] *= 0.98
+
+            p["size"] += 0.15
+            p["life"] -= 1
+
+        self.particles = [p for p in self.particles if p["life"] > 0]
+
+    def draw(self, screen, camera_x, camera_y):
+
+        for p in self.particles:
+
+            alpha = int(180 * (p["life"] / 110))
+
+            surf = pygame.Surface((int(p["size"]*2), int(p["size"]*2)), pygame.SRCALPHA)
+
+            pygame.draw.circle(
+                surf,
+                (140, 0, 190, alpha),
+                (int(p["size"]), int(p["size"])),
+                int(p["size"])
+            )
+
+            screen.blit(
+                surf,
+                (p["x"] - camera_x - p["size"], p["y"] - camera_y - p["size"])
+            )
 # ---------------- Item CLASS ---------------- #
 class Item:
     def __init__(self, x, y, image, item_type, name):
@@ -200,9 +300,29 @@ class Item:
             self.rect.topleft = (self.x, self.y)
 
     def draw(self, screen, camera_x, camera_y):
-        screen.blit(self.image, (self.x - camera_x, self.y - camera_y))
+        draw_x = self.x - camera_x
+        draw_y = self.y - camera_y
 
-# ---------------- Item CLASS ---------------- #
+        # צייר רק אם החפץ נמצא בתוך הגבולות של המסך הנוכחי!
+        if -self.size <= draw_x <= screen.get_width() and -self.size <= draw_y <= screen.get_height():
+            screen.blit(self.image, (draw_x, draw_y))
+
+# ---------------- HP Potion CLASS ---------------- #
+class Potion:
+    def __init__(self,x,y,image,name):
+        self.image = image
+        self.x = x
+        self.y = y
+        self.size = 64
+        self.name = name
+    def draw(self, screen, camera_x, camera_y):
+        draw_x = self.x - camera_x
+        draw_y = self.y - camera_y
+
+        if -self.size <= draw_x <= screen.get_width() and -self.size <= draw_y <= screen.get_height():
+            screen.blit(self.image, (draw_x, draw_y))
+
+# ---------------- MONSTER CLASS ---------------- #
 class Monster:
     def __init__(self, x, y, hp, image):
         self.x = x
@@ -434,35 +554,41 @@ def draw_chat(screen, chat_font, chat_messages, chat_open, chat_input):
         screen.blit(chat_font.render(chat_input + cursor, True, CHAT_TEXT_COLOR), (CHAT_X + CHAT_PADDING, input_y + CHAT_PADDING))
 
 
-def draw_fps(screen, clock, font):
-    """
-    מציירת מדד FPS מעוצב בפינה העליונה.
-    """
-    # שליפת ה-FPS הנוכחי מהשעון של Pygame
-    fps_val = int(clock.get_fps())
-    fps_text = f"FPS: {fps_val}"
+def draw_fps(screen, clock, font, server_fps):
+    client_fps_val = int(clock.get_fps())
+    client_color = (0, 255, 0) if client_fps_val > 30 else (255, 50, 50)
+    client_surface = font.render(f"Client FPS: {client_fps_val}", True, client_color)
 
-    # יצירת המשטח של הטקסט
-    # צבע ירוק אם ה-FPS גבוה, אדום אם הוא נמוך מ-30
-    color = (0, 255, 0) if fps_val > 30 else (255, 50, 50)
-    fps_surface = font.render(fps_text, True, color)
 
-    # הגדרת מיקום וגודל הרקע (Rect)
+    try:
+        server_fps_val = int(server_fps)
+        server_color = (0, 255, 0) if server_fps_val > 30 else (255, 50, 50)
+        server_text = f"Server TPS: {server_fps_val}"
+    except (ValueError, TypeError):
+
+        server_text = "Server TPS: ?"
+        server_color = (255, 255, 255)
+
+    server_surface = font.render(server_text, True, server_color)
+
+
     padding = 10
-    rect_width = fps_surface.get_width() + (padding * 2)
-    rect_height = fps_surface.get_height() + (padding)
+
+    max_text_width = max(client_surface.get_width(), server_surface.get_width())
+    rect_width = max_text_width + (padding * 2)
+
+    rect_height = client_surface.get_height() + server_surface.get_height() + (padding * 2)
+
     fps_rect = pygame.Rect(10, 10, rect_width, rect_height)
 
-    # ציור רקע שחור חצי שקוף
     bg_surface = pygame.Surface((rect_width, rect_height), pygame.SRCALPHA)
     bg_surface.fill((0, 0, 0, 150))  # 150 זה רמת השקיפות
     screen.blit(bg_surface, (10, 10))
 
-    # ציור מסגרת דקה סביב המדד
     pygame.draw.rect(screen, (100, 100, 100), fps_rect, 1)
 
-    # ציור הטקסט עצמו
-    screen.blit(fps_surface, (10 + padding, 10 + padding // 2))
+    screen.blit(client_surface, (10 + padding, 10 + padding // 2))
+    screen.blit(server_surface, (10 + padding, 10 + padding + client_surface.get_height()))
 
 
 def draw_bullet(screen, bullet_img, x, y, angle, camera_x, camera_y):
@@ -499,12 +625,14 @@ def main():
     floor_img = pygame.image.load("img/DesertTile.png").convert()
     wall_img = pygame.image.load("img/watertile.png").convert()
 
-    bullet_img = pygame.image.load("img/bullet.png").convert()
+    bullet_img = pygame.image.load("img/bullet.png").convert_alpha()
 
+    inventory_open = False
+    ui_font = pygame.font.SysFont("arial", 22)
 
     floor_img = pygame.transform.scale(floor_img, (tile_size, tile_size))
     wall_img = pygame.transform.scale(wall_img, (tile_size, tile_size))
-    bullet_img = pygame.transform.scale(bullet_img, (10.7 ,5.4))
+    bullet_img = pygame.transform.scale(bullet_img, (21, 11))
     game_map = load_map("map.txt")
 
     player = Player(128, 128)
@@ -523,16 +651,22 @@ def main():
         "rpg": pygame.transform.scale(pygame.image.load("img/rpg_right.png").convert_alpha(), (64, 64))
     }
     monster_img = pygame.transform.scale(pygame.image.load("img/monster_down.png").convert_alpha(), (64, 64))
-
+    potion_img =  pygame.transform.scale(pygame.image.load("img/hp_Potion.png").convert_alpha(), (40, 40))
+    poison_img =  pygame.transform.scale(pygame.image.load("img/poison_item.png").convert_alpha(), (40, 40))
+    
     remote_players = {}
     # Loot pool (מאגר פריטים)
 
     # loot_items = spawn_loot_per_camera_zone(game_map, tile_size, loot_pool, screen.get_width(), screen.get_height(),per_zone=1)
     loot_items = []
+    poison_effects = []
     monsters=[]
+    inventory = []
+    hp_items = []
     # print("Loot spawned:", len(loot_items))
     # print("First loot at:", loot_items[0].x, loot_items[0].y)
     bullets = {} #bullet id -> {x,y,angle}
+    server_fps = 0
 
     running = True
     while running:
@@ -561,17 +695,39 @@ def main():
                     chat_open = True
                     chat_input = ""
 
+                if event.key == pygame.K_i:
+                    inventory_open = not inventory_open
 
                 if event.key == pygame.K_n:
                     player.auto_walk = not player.auto_walk
                     print("Auto-walk:", player.auto_walk)
 
                 if event.key == pygame.K_e and len(player.inventory) < 5:
-                    nearby = get_nearby_item(player, loot_items)
-                    if nearby:
-                        player.pick_item(nearby)  # מוסיף ל־Inventory
-                        loot_items.remove(nearby)
-                        outgoing_messages.put(f"PICKUP|{nearby.x},{nearby.y}|{nearby.name}")
+                    nearby_loot = get_nearby_item(player, loot_items)
+                    nearby_potion = get_nearby_item(player,hp_items)
+                    if nearby_loot:
+                        player.pick_item(nearby_loot)  # מוסיף ל־Inventory
+                        loot_items.remove(nearby_loot)
+                        outgoing_messages.put(f"PICKUP|{nearby_loot.x},{nearby_loot.y}|{nearby_loot.name}")
+                    elif nearby_potion:
+                        # player.hp += UP_HP
+                        hp_items.remove(nearby_potion)
+                        inventory.append(nearby_potion)
+                        outgoing_messages.put(f"PPICKUP|{nearby_potion.x},{nearby_potion.y}|{nearby_potion.name}")
+                        print(nearby_potion.name)
+                        print("Picked potion")
+
+                if event.key == pygame.K_x:
+                    if len(inventory) > 0:
+                        item = inventory.pop(0)# take the first on the inventory
+                        if item.name == "Potion":
+                            player.hp += UP_HP
+                            if player.hp > 100:
+                                player.hp = 100
+                            outgoing_messages.put(f"USE|{item.name}")
+
+                        elif item.name == "Poison":
+                            outgoing_messages.put(f"USE|{item.name}|{player.x+32},{player.y+32}")
 
                 if event.key == pygame.K_q:
                     slot_to_drop = player.selected_slot
@@ -710,10 +866,16 @@ def main():
                 y_pick = float(y_pick)
                 type_pick = parts[2]
 
-                for item in loot_items:
-                    if item.x==x_pick and item.y == y_pick and item.name == type_pick:
-                        loot_items.remove(item)
-                        break
+                if type_pick != "Potion":
+                    for item in loot_items:
+                        if item.x==x_pick and item.y == y_pick and item.name == type_pick:
+                            loot_items.remove(item)
+                            break
+                else:
+                    for potion in hp_items:
+                        if potion.x==x_pick and potion.y == y_pick:
+                            hp_items.remove(potion)
+                            break
 
             elif parts[0] == "CHAT":
                 if len(parts) < 3:
@@ -726,6 +888,9 @@ def main():
             elif parts[0] == "SETID":
                 if MY_ID == "":
                     MY_ID = parts[1]
+
+            elif parts[0] == "FPS":
+                server_fps = parts[1]
             elif parts[0] == "MONSTERS":
                 monsters.clear()
                 for monster_data in parts[1:]:
@@ -734,7 +899,33 @@ def main():
                     y_monster = float(y_monster)
                     hp_monster = int(hp_monster)
 
-                    monsters.append(Monster(x_monster, y_monster, hp_monster,monster_img))
+                    if hp_monster > 0:
+                        monsters.append(Monster(x_monster, y_monster, hp_monster,monster_img))
+            elif parts[0] == "POTIONS":
+                for hp_item in parts[1:]:
+                    x_potion, y_potion = hp_item.split(",")
+                    x_potion = float(x_potion)
+                    y_potion = float(y_potion)
+
+                    hp_items.append(Potion(x_potion,y_potion,potion_img,"Potion"))
+            elif parts[0] == "POISON":
+                pos = parts[1]
+                x,y = map(float,pos.split(","))
+
+                poison_effects.append(PoisonEffect(x, y))
+
+            elif parts[0] == "ITEMS":
+                if len(parts) < 3:
+                    continue
+
+                x_item, y_item = parts[1].split(",")
+                x_item = float(x_item)
+                y_item = float(y_item)
+
+                if parts[2] == "Potion":
+                    hp_items.append(Potion(x_item, y_item, potion_img,"Potion"))
+                elif parts[2] == "Poison":
+                    hp_items.append(Potion(x_item, y_item, poison_img,"Poison"))
 
 
         # --- CAMERA FOLLOWS PLAYER ---
@@ -752,9 +943,17 @@ def main():
         for rp in remote_players.values():
             rp.draw(screen, camera_x, camera_y)
         for monster in monsters:
-            monster.update()
-            monster.draw(screen, camera_x, camera_y)
+            if camera_x - 100 <= monster.x <= camera_x + screen.get_width() + 100 and camera_y - 100 <= monster.y <= camera_y + screen.get_height() + 100:
+                monster.update()
+                monster.draw(screen, camera_x, camera_y)
+        for hp_item in hp_items:
+            hp_item.draw(screen, camera_x, camera_y)
 
+        for effect in poison_effects:
+            effect.update()
+            effect.draw(screen, camera_x, camera_y)
+
+        poison_effects = [e for e in poison_effects if len(e.particles) > 0]
 
         # calculate the bullets movements and show them
         for i in bullets:
@@ -772,9 +971,11 @@ def main():
             #del bullets[i]
 
 
-        draw_fps(screen, clock, chat_font)
+        draw_fps(screen, clock, chat_font, server_fps)
         draw_inventory(screen, player)
         draw_chat(screen, chat_font, chat_messages, chat_open, chat_input)
+        if inventory_open:
+            draw_big_inventory(screen, player, inventory, ui_font)
         pygame.display.flip()
 
 

@@ -200,7 +200,43 @@ class Item:
             self.rect.topleft = (self.x, self.y)
 
     def draw(self, screen, camera_x, camera_y):
-        screen.blit(self.image, (self.x - camera_x, self.y - camera_y))
+        draw_x = self.x - camera_x
+        draw_y = self.y - camera_y
+
+        # צייר רק אם החפץ נמצא בתוך הגבולות של המסך הנוכחי!
+        if -self.size <= draw_x <= screen.get_width() and -self.size <= draw_y <= screen.get_height():
+            screen.blit(self.image, (draw_x, draw_y))
+
+# ---------------- Item CLASS ---------------- #
+class Monster:
+    def __init__(self, x, y, hp, image):
+        self.x = x
+        self.y = y
+        self.hp = hp
+        self.image = image
+        self.size = 64
+        self.rect = pygame.Rect(x, y, self.size, self.size)
+
+    def update(self):
+        self.rect.topleft = (self.x, self.y)
+
+    def draw(self, screen, camera_x, camera_y):
+        draw_x = self.rect.x - camera_x
+        draw_y = self.rect.y - camera_y
+
+        screen.blit(self.image, (draw_x, draw_y))
+
+        if -self.size <= draw_x <= screen.get_width() and -self.size <= draw_y <= screen.get_height():
+            bar_width = 100
+            bar_height = 5
+            bar_x = draw_x + (self.size // 2) - (bar_width // 2)
+            bar_y = draw_y - 10
+
+            pygame.draw.rect(screen, (255, 0, 0), (bar_x, bar_y, bar_width, bar_height))
+
+            if self.hp > 0:
+                current_hp_width = min(self.hp, bar_width)
+                pygame.draw.rect(screen, (0, 255, 0), (bar_x, bar_y, current_hp_width, bar_height))
 
 # ---------------- Item CLASS ---------------- #
 class Monster:
@@ -420,35 +456,41 @@ def draw_chat(screen, chat_font, chat_messages, chat_open, chat_input):
         screen.blit(chat_font.render(chat_input + cursor, True, CHAT_TEXT_COLOR), (CHAT_X + CHAT_PADDING, input_y + CHAT_PADDING))
 
 
-def draw_fps(screen, clock, font):
-    """
-    מציירת מדד FPS מעוצב בפינה העליונה.
-    """
-    # שליפת ה-FPS הנוכחי מהשעון של Pygame
-    fps_val = int(clock.get_fps())
-    fps_text = f"FPS: {fps_val}"
+def draw_fps(screen, clock, font, server_fps):
+    client_fps_val = int(clock.get_fps())
+    client_color = (0, 255, 0) if client_fps_val > 30 else (255, 50, 50)
+    client_surface = font.render(f"Client FPS: {client_fps_val}", True, client_color)
 
-    # יצירת המשטח של הטקסט
-    # צבע ירוק אם ה-FPS גבוה, אדום אם הוא נמוך מ-30
-    color = (0, 255, 0) if fps_val > 30 else (255, 50, 50)
-    fps_surface = font.render(fps_text, True, color)
 
-    # הגדרת מיקום וגודל הרקע (Rect)
+    try:
+        server_fps_val = int(server_fps)
+        server_color = (0, 255, 0) if server_fps_val > 30 else (255, 50, 50)
+        server_text = f"Server TPS: {server_fps_val}"
+    except (ValueError, TypeError):
+
+        server_text = "Server TPS: ?"
+        server_color = (255, 255, 255)
+
+    server_surface = font.render(server_text, True, server_color)
+
+
     padding = 10
-    rect_width = fps_surface.get_width() + (padding * 2)
-    rect_height = fps_surface.get_height() + (padding)
+
+    max_text_width = max(client_surface.get_width(), server_surface.get_width())
+    rect_width = max_text_width + (padding * 2)
+
+    rect_height = client_surface.get_height() + server_surface.get_height() + (padding * 2)
+
     fps_rect = pygame.Rect(10, 10, rect_width, rect_height)
 
-    # ציור רקע שחור חצי שקוף
     bg_surface = pygame.Surface((rect_width, rect_height), pygame.SRCALPHA)
     bg_surface.fill((0, 0, 0, 150))  # 150 זה רמת השקיפות
     screen.blit(bg_surface, (10, 10))
 
-    # ציור מסגרת דקה סביב המדד
     pygame.draw.rect(screen, (100, 100, 100), fps_rect, 1)
 
-    # ציור הטקסט עצמו
-    screen.blit(fps_surface, (10 + padding, 10 + padding // 2))
+    screen.blit(client_surface, (10 + padding, 10 + padding // 2))
+    screen.blit(server_surface, (10 + padding, 10 + padding + client_surface.get_height()))
 
 
 def draw_bullet(screen, bullet_img, x, y, angle, camera_x, camera_y):
@@ -519,6 +561,7 @@ def main():
     # print("Loot spawned:", len(loot_items))
     # print("First loot at:", loot_items[0].x, loot_items[0].y)
     bullets = {} #bullet id -> {x,y,angle}
+    server_fps = 0
 
     running = True
     while running:
@@ -723,6 +766,19 @@ def main():
                     monsters.append(Monster(x_monster, y_monster, hp_monster,monster_img))
 
 
+            elif parts[0] == "FPS":
+                server_fps = parts[1]
+            elif parts[0] == "MONSTERS":
+                monsters.clear()
+                for monster_data in parts[1:]:
+                    x_monster, y_monster,hp_monster= monster_data.split(",")
+                    x_monster = float(x_monster)
+                    y_monster = float(y_monster)
+                    hp_monster = int(hp_monster)
+
+                    monsters.append(Monster(x_monster, y_monster, hp_monster,monster_img))
+
+
         # --- CAMERA FOLLOWS PLAYER ---
         camera_x = player.x - screen.get_width() // 2
         camera_y = player.y - screen.get_height() // 2
@@ -758,7 +814,7 @@ def main():
             #del bullets[i]
 
 
-        draw_fps(screen, clock, chat_font)
+        draw_fps(screen, clock, chat_font, server_fps)
         draw_inventory(screen, player)
         draw_chat(screen, chat_font, chat_messages, chat_open, chat_input)
         pygame.display.flip()
