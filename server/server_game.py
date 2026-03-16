@@ -6,6 +6,8 @@ import heapq
 import time
 import json
 
+import pygame
+
 from server import gs_and_lb_helper_functions
 from itertools import count
 from aioquic.asyncio import QuicConnectionProtocol, serve
@@ -24,10 +26,11 @@ SCREEN_HEIGHT = 1080
 MAX_WEAPONS = 9000
 AMOUNT_TO_DROP_IN_DEATH = 2
 ENTITIES_SPEED = 4
-WEAPON_LIST = [["gun", 20, TILE_SIZE * 10],["rifle" ,10 , TILE_SIZE * 20],["rpg",30,TILE_SIZE*25]] #-> name,damage,range
+WEAPON_LIST = [["gun", 20, TILE_SIZE * 10],["rifle" ,10 , TILE_SIZE * 20],["rpg",30,TILE_SIZE*25], ["knife", 35, 5]] #-> name,damage,range
 WEAPON_NAMES = [w[0] for w in WEAPON_LIST]
 WEAPON_DAMAGE = [w[1] for w in WEAPON_LIST]
 WEAPON_RANGE = [w[2] for w in WEAPON_LIST]
+BOMB_WEAPON = ["bomb", 35, 15]
 MONSTER_CHANGE_PATH_EVERY_SET_SECONDS = 3
 MONSTER_ACCURACY = 65  # 1-100
 MAX_POTION = 9000
@@ -35,11 +38,15 @@ POTION_LIST = [["potion", 40]] #-> name,hp++
 counter = count()
 monsters_list = []
 SERVER_FPS = 0
+SKILL_COOL_TIME = 12
 
 LB_PORT = 8080
 
 MY_IP = gs_and_lb_helper_functions.get_local_ip()
-MY_PORT = 4433
+MY_PORT = 4434
+
+P2P_PORT_OFFSET = 4000
+
 
 def load_map():
     with open("map.txt", "r") as f:
@@ -56,18 +63,16 @@ class GameState:
 
         self.server_id = None
         self.server_area = None
-
-        #------ Game server neighbors -----
-
-        self.neighbor = {} #left -> x,ip,port /right -> x,ip,port
+        self.neighbor_conns = {}
 
         # ----- players info -----
+        self.ghost_players = {}
         self.players_pos = {}          # client_id -> "x,y"
         self.players_hp = {}           # client_id -> hp
         self.players_inventory = {}    # client_id -> {slot1..slot5}
         self.active_clients = set()    # set of EchoQuicProtocol
         self.active_bullets = {}       # bullet_id -> {x, y, angle}
-
+        self.players_skills = {}
         # ----- game info -----
         self.map_weapons = {}          # weapon_id -> {x, y, type}
         self.game_map = load_map()
@@ -85,6 +90,15 @@ class EchoQuicProtocol(QuicConnectionProtocol):
         state.active_clients.add(self)
         self.stream_id = None
         self.recv_buffer = ""  # for newline-delimited messages
+
+    def broadcast_remove_player(self, client_id):
+        msg = f"REMOVE_PLAYER|{client_id}\n".encode()
+        for client in state.active_clients:
+            try:
+                client._quic.send_stream_data(client.stream_id, msg)
+                client.transmit()
+            except:
+                pass
 
     def quic_event_received(self, event: QuicEvent) -> None:
         if isinstance(event, StreamDataReceived):
@@ -115,6 +129,9 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 print("Error while splitting Connected command!")
                 return
 
+            current_skill = Skill("Speed Boost", 5, 0, False)
+
+            state.players_skills[client_id] = current_skill
             if len(parts) < 3:
                 state.players_pos[client_id] = "0,0"
                 state.players_hp[client_id] = "100"
@@ -157,30 +174,75 @@ class EchoQuicProtocol(QuicConnectionProtocol):
         elif data_str.startswith("UPDATE|"):
             try:
                 parts = data_str.split("|")
-            except:
-                print("Error while splitting UPDATE command!")
-                return
-            if len(parts) < 2:
-                return
-            new_pos = parts[1]
+                if len(parts) < 2: return
 
-            if self._quic.host_cid.hex() not in state.players_pos:
-                return
-            for other_id, other_pos in list(state.players_pos.items()):
-                if other_id == self._quic.host_cid.hex():
-                    continue
-                if other_pos == new_pos:
+                new_pos = parts[1]
+                client_id = self._quic.host_cid.hex()
+
+                # 1. אימות בסיסי - האם השחקן קיים והתנועה חוקית?
+                if client_id not in state.players_pos: return
+
+                if check_movement(new_pos, state.players_pos[self._quic.host_cid.hex()],
+                                  state.players_skills[self._quic.host_cid.hex()]):
+                    state.players_pos[self._quic.host_cid.hex()] = new_pos
+                    self.broadcast_player(self._quic.host_cid.hex(), new_pos,
+                                          state.players_hp[self._quic.host_cid.hex()],
+                                          False)
+                else:
                     self.disconnect()  # kick the player
-                    print("player has been kicked! player collision")
-                    return
+                    print("player has been kicked! movement problem")
 
-            if check_movement(new_pos, state.players_pos[self._quic.host_cid.hex()]):
-                state.players_pos[self._quic.host_cid.hex()] = new_pos
-                self.broadcast_player(self._quic.host_cid.hex(), new_pos, state.players_hp[self._quic.host_cid.hex()],
-                                      False)
-            else:
-                self.disconnect() #kick the player
-                print("player has been kicked! movement problem")
+                # 2. עדכון המיקום בשרת המקומי (אחרי שווידאנו שהתנועה חוקית)
+                state.players_pos[client_id] = new_pos
+                px, _ = map(float, new_pos.split(","))
+
+                # 3. בדיקת תחומי אחריות (רק אם ה-LB כבר שלח לנו שטח)
+                if state.server_area:
+                    core_min, core_max = state.server_area['core']
+                    overlap = 500  # כדאי להגדיר כקבוע גלובלי
+
+                    # --- לוגיקת Handoff (מעבר שרת) ---
+                    if px < core_min or px > core_max:
+                        direction = "left" if px < core_min else "right"
+                        neighbor = state.server_area['neighbors'].get(direction)
+
+                        if neighbor:
+                            # 1. שלח הודעת ניקוי לשכנים - כדי שלא יישאר Ghost תקוע
+                            for side in ["left", "right"]:
+                                n = state.server_area['neighbors'].get(side)
+                                if n:
+                                    asyncio.create_task(send_to_neighbor(n['id'], f"REMOVE_GHOST|{client_id}\n"))
+
+                            # 2. בצע את ה-SWITCH
+                            switch_msg = f"SWITCH|{neighbor['host']}|{neighbor['port']}\n".encode()
+                            self._quic.send_stream_data(self.stream_id, switch_msg)
+                            self.transmit()
+
+                            # 3. ניקוי מקומי וניתוק
+                            self.disconnect()
+                            return
+
+
+                    in_left_zone = px < (core_min + overlap)
+                    in_right_zone = px > (core_max - overlap)
+
+                    if in_left_zone or in_right_zone:
+                        side = "left" if in_left_zone else "right"
+                        neighbor = state.server_area['neighbors'].get(side)
+                        if neighbor:
+                            ghost_msg = f"GHOST_UPDATE|{client_id}|{new_pos}|{state.players_hp[client_id]}\n"
+                            asyncio.create_task(send_to_neighbor(neighbor['id'], ghost_msg))
+                    else:
+                        for side in ["left", "right"]:
+                            neighbor = state.server_area['neighbors'].get(side)
+                            if neighbor:
+                                remove_ghost_msg = f"REMOVE_GHOST|{client_id}\n"
+                                asyncio.create_task(send_to_neighbor(neighbor['id'], remove_ghost_msg))
+
+                self.broadcast_player(client_id, new_pos, state.players_hp[client_id], False)
+
+            except Exception as e:
+                print(f"Error in UPDATE logic: {e}")
 
         # ATTACK
         elif data_str.startswith("ATTACK|"):
@@ -191,9 +253,18 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 return
             if len(parts) < 3:
                 return
-            weapon_slot = parts[1]
-            weapon = state.players_inventory[client_id][int(weapon_slot)]
-            if weapon in WEAPON_NAMES:
+
+            can_use_bombs = False
+
+            if state.players_skills[client_id].name == "Bombs" and state.players_skills[client_id].is_active == True:
+                weapon = "bomb"
+                can_use_bombs = True
+                print("bomb throw")
+            else:
+                weapon_slot = parts[1]
+                weapon = state.players_inventory[client_id][int(weapon_slot)]
+
+            if weapon in WEAPON_NAMES or can_use_bombs:
                 new_id = random.randint(1, MAX_BULLETS)
                 while new_id in state.active_bullets:
                     new_id = random.randint(1, MAX_BULLETS)
@@ -363,6 +434,33 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             client_id = self._quic.host_cid.hex()
             self.broadcast_chat(msg , client_id)
 
+        elif data_str.startswith("SKILL|"):
+            try:
+                parts = data_str.split("|")
+            except:
+                print("Error while splitting the SKILL command!")
+                return
+            if len(parts) < 3:
+                return
+
+            try:
+                sent_skill = skills_dict[parts[1]]
+            except:
+                self.disconnect()
+                return
+            click_time = float(parts[2])
+            elapsed_since_last_press = click_time - state.players_skills[client_id].last_action_time
+            required_time = state.players_skills[client_id].duration_time + SKILL_COOL_TIME
+
+            if elapsed_since_last_press >= required_time:
+                state.players_skills[client_id] = sent_skill
+                state.players_skills[client_id].last_action_time = click_time
+                state.players_skills[client_id].is_active = True
+                print("Skill Activated!")
+                self.broadcast_skill(client_id, state.players_skills[client_id],False)
+                asyncio.create_task(state.players_skills[client_id].timer(client_id, self.broadcast_skill))
+            else:
+                print("Skill issue!")
 
         # DISCONNECT
         elif data_str == "Disconnected":
@@ -403,8 +501,8 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             client._quic.send_stream_data(client.stream_id, msg, end_stream=False)
             client.transmit()
 
-    def broadcast_show_bullet(self, pos: str ,angle: str, bullet_id: str):
-        msg = f"SHOW-BULLET|{pos}|{angle}|{bullet_id}\n".encode()
+    def broadcast_show_bullet(self, pos: str, angle: str, bullet_id: str, bullet_type: str):
+        msg = f"SHOW-BULLET|{pos}|{angle}|{bullet_id}|{bullet_type}\n".encode()
         for client in list(state.active_clients):
             if client.stream_id is None:
                 continue
@@ -428,8 +526,30 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             client._quic.send_stream_data(client.stream_id, msg, end_stream=False)
             client.transmit()
 
-    def broadcast_player(self, sender_id: str, pos_str: str, hp, to_yourself: bool):
-        msg = f"UPDATE|{sender_id}|{pos_str}|{hp}\n".encode()
+    def broadcast_player(self, client_id, pos, hp, is_dead=False):
+        msg = f"PLAYER_UPDATE|{client_id}|{pos}|{hp}|{is_dead}\n".encode()
+
+        for client in list(state.active_clients):
+            if client.stream_id is not None:
+                try:
+                    client._quic.send_stream_data(client.stream_id, msg)
+                    client.transmit()
+                except:
+                    continue
+
+    def broadcast_ghosts(self):
+        for g_id, g_data in state.ghost_players.items():
+            g_msg = f"PLAYER_UPDATE|{g_id}|{g_data['pos']}|{g_data['hp']}|False\n".encode()
+            for client in list(state.active_clients):
+                if client.stream_id is not None:
+                    try:
+                        client._quic.send_stream_data(client.stream_id, g_msg)
+                        client.transmit()
+                    except:
+                        continue
+
+    def broadcast_skill(self, sender_id: str, skill, to_yourself: bool):
+        msg = f"SKILL|{sender_id}|{skill.name}|{skill.is_active}\n".encode()
         for client in list(state.active_clients):
             if client == self and not to_yourself:
                 continue
@@ -437,20 +557,20 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 continue
             client._quic.send_stream_data(client.stream_id, msg, end_stream=False)
             client.transmit()
-        print("changed! -", msg)
 
     # ---------- Game logic ---------- #
 
     def disconnect(self):
         client_id = self._quic.host_cid.hex()
         self.broadcast_remove(client_id)
-
         if client_id in state.players_pos:
             del state.players_pos[client_id]
         if client_id in state.players_hp:
             del state.players_hp[client_id]
         if client_id in state.players_inventory:
             del state.players_inventory[client_id]
+        if client_id in state.players_skills:
+            del state.players_skills[client_id]
         if self in state.active_clients:
             state.active_clients.remove(self)
 
@@ -465,14 +585,19 @@ class EchoQuicProtocol(QuicConnectionProtocol):
         angle = state.active_bullets[bullet_id]["angle"]
         gun_range = 0
         gun_damage = 0
-        for i in range(len(WEAPON_NAMES)):
-            if WEAPON_NAMES[i] == gun_type:
-                gun_damage = int(WEAPON_DAMAGE[i])
-                gun_range = int(WEAPON_RANGE[i])
+        if gun_type == "bomb":
+            gun_damage = BOMB_WEAPON[1]
+            gun_range = BOMB_WEAPON[2]
+        else:
+            for i in range(len(WEAPON_NAMES)):
+                if WEAPON_NAMES[i] == gun_type:
+                    gun_damage = int(WEAPON_DAMAGE[i])
+                    gun_range = int(WEAPON_RANGE[i])
+                    break
         pos = f"{x},{y}"
-        self.broadcast_show_bullet(pos , angle , str(bullet_id))
+        self.broadcast_show_bullet(pos, angle, str(bullet_id), "bomb" if gun_type == "bomb" else "bullet")
         for _ in range(gun_range):
-            x, y = get_next_bullet_position(x, y, angle)
+            x, y = get_next_bullet_position(x, y, angle, (15 if gun_type == "bullet" else 8))
             state.active_bullets[bullet_id]["x"] = x
             state.active_bullets[bullet_id]["y"] = y
 
@@ -523,6 +648,9 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
     def damage(self, client_id: str, damage: int):
         hp = int(state.players_hp.get(client_id))
+        if state.players_skills[client_id].name == 'Shield' and state.players_skills[client_id].is_active:
+            print("shield protection")
+            return
         if hp - damage <= 0:
             pos = state.players_pos[client_id]
             dropped = 0
@@ -556,6 +684,8 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 del state.players_hp[client_id]
             if client_id in state.players_inventory:
                 del state.players_inventory[client_id]
+            if client_id in state.players_skills:
+                del state.players_skills[client_id]
             client_to_remove = None
             for client in state.active_clients:
                 if client._quic.host_cid.hex() == client_id:
@@ -567,7 +697,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             print("player killed!")
         else:
             state.players_hp[client_id] = hp - damage
-            self.broadcast_player(client_id, state.players_pos[client_id], state.players_hp[client_id], True)
+            self.broadcast_player(client_id, state.players_pos[client_id], state.players_hp[client_id], False)
 
 
 # ---------- Utils ---------- #
@@ -575,6 +705,23 @@ class Node:
   def __init__(self, data):
     self.data = data
     self.next = None
+
+class Skill:
+    def __init__(self, name, duration_time, last_action_time, is_active):
+        self.name = name
+        self.duration_time = duration_time
+        self.last_action_time = last_action_time
+        self.is_active = is_active
+
+    async def timer(self, client_id, broadcast_skill):
+        # Wait for the duration (this doesn't block the rest of the code)
+        await asyncio.sleep(self.duration_time)
+        # After waiting, turn it off
+        self.is_active = False
+        state.players_skills[client_id] = self
+        broadcast_skill(client_id, self, False)
+
+        print(f"{self.name} duration finished!")
 
 
 class Monster:
@@ -831,12 +978,12 @@ def A_star_algorythm(start, target, desired_range):
 
     return None
 
-def get_next_bullet_position(x, y, angle_degrees):
+def get_next_bullet_position(x, y, angle_degrees, speed):
     angle_rad = math.radians(angle_degrees)
-    return x + math.cos(angle_rad)*15 , y + math.sin(angle_rad)*15
+    return x + math.cos(angle_rad)*speed , y + math.sin(angle_rad)*speed
 
 
-def check_movement(new_pos, old_pos):
+def check_movement(new_pos, old_pos, skill):
     try:
         new_x, new_y = map(float, new_pos.split(","))
         old_x, old_y = map(float, old_pos.split(","))
@@ -845,9 +992,13 @@ def check_movement(new_pos, old_pos):
         return
     if check_if_in_map(new_x, new_y):
         if state.game_map[int(new_y / TILE_SIZE)][int(new_x / TILE_SIZE)] == ".":
-            if abs(new_x - old_x) <= 8 and abs(new_y - old_y) <= 8:
+            current_time = pygame.time.get_ticks() / 1000  # Get time in seconds
+            if (abs(new_x - old_x) <= 6 and abs(new_y - old_y) <= 6) or (
+                    skill.name == "Speed Boost" and current_time - skill.last_action_time - skill.duration_time <= 2):
                 return True
-
+            elif abs(new_x - old_x) <= 10 and abs(
+                    new_y - old_y) <= 10 and skill.name == "Speed Boost" and skill.is_active:
+                return True
     return False
 
 
@@ -976,11 +1127,6 @@ async def monsters_manager():
             if dist_to_player > 1500:
                 monster.path = None
                 continue
-                t-l(x,0)
-            if monster.x < state.server_area["t-l"][0] or monster.x > state.server_area["t-r"][0]:
-                msg = f"CHANGE-MONSTER|{monster.x}|{monster.y}|{monster.weapon}"
-                await send_to_lb(msg)
-                del monster
 
             # --- הגיון הלחימה של המפלצת ---
             # אם השחקן בטווח הנשק של המפלצת
@@ -1104,136 +1250,136 @@ def broadcast_fps():
         client.transmit()
 
 
+async def handle_p2p_connection(reader, writer):
+    try:
+        while True:
+            line = await reader.readline()
+            if not line: break
+
+            data = line.decode().strip()
+            parts = data.split("|")
+
+            if parts[0] == "GHOST_UPDATE":
+                cid = parts[1]
+                pos = parts[2]
+                hp = int(parts[3])
+                state.ghost_players[cid] = {"pos": pos, "hp": hp}
+
+                if state.active_clients:
+                    any_client = next(iter(state.active_clients))
+                    any_client.broadcast_ghosts()
+
+
+            elif parts[0] == "REMOVE_GHOST":
+                cid = parts[1]
+                state.ghost_players.pop(cid, None)
+
+                remove_msg = f"REMOVE_PLAYER|{cid}\n".encode()
+                for client in list(state.active_clients):  # שימוש ב-active_clients
+                    try:
+                        if client.stream_id is not None:
+                            client._quic.send_stream_data(client.stream_id, remove_msg)
+                            client.transmit()
+                    except:
+                        continue
+
+    except Exception as e:
+        print(f"[P2P] Error: {e}")
+
+
+async def connect_to_neighbor(neighbor_id, host, port):
+    """יוצר חיבור P2P לשרת שכן אם הוא לא קיים"""
+    if neighbor_id not in state.neighbor_conns:
+        try:
+            # ה-P2P יושב על פורט עם Offset (למשל +4000)
+            p2p_port = port + P2P_PORT_OFFSET
+            reader, writer = await asyncio.open_connection(host, p2p_port)
+            state.neighbor_conns[neighbor_id] = (reader, writer)
+            print(f"[*] Connected P2P to GS-{neighbor_id} at {host}:{p2p_port}")
+        except Exception as e:
+            print(f"[!] Failed to connect to GS-{neighbor_id}: {e}")
+
+
+async def send_to_neighbor(neighbor_id, message):
+    neighbor = None
+    if state.server_area:
+        for side in ["left", "right"]:
+            n = state.server_area['neighbors'].get(side)
+            if n and n['id'] == neighbor_id:
+                neighbor = n
+                break
+
+    if neighbor:
+        await connect_to_neighbor(neighbor['id'], neighbor['host'], neighbor['port'])
+
+        if neighbor_id in state.neighbor_conns:
+            _, writer = state.neighbor_conns[neighbor_id]
+            try:
+                writer.write(message.encode())
+                await writer.drain()
+            except:
+                print(f"[!] Lost P2P connection to GS-{neighbor_id}")
+                del state.neighbor_conns[neighbor_id]
+
+
 async def connect_to_lb():
     while True:
         try:
             print(f"[*] Attempting to connect to LB at {state.lb_host}:{state.lb_port}...")
+            reader, writer = await asyncio.open_connection(state.lb_host, state.lb_port)
 
-            reader, writer = await asyncio.open_connection(state.lb_host, state.lb_port , limit=1024 * 1024 * 10)
-            state.lb_writer = writer
+            # שלח הודעת הזדהות (אם יש ID השתמש ב-RECONNECT, אם לא REGISTER)
+            auth_type = "RECONNECT" if state.server_id is not None else "REGISTER"
+            payload = f"{auth_type}|{state.server_id if state.server_id is not None else f'{MY_IP}|{MY_PORT}'}\n"
 
-            connect_msg = f"Server connect|{MY_IP}|{psutil.cpu_percent()}|{MY_PORT}\n"
-            writer.write(connect_msg.encode())
+            writer.write(payload.encode())
             await writer.drain()
 
-            asyncio.create_task(send_heartbeats_to_lb(writer))
-
+            # לולאת האזנה לעדכונים מה-LB (שטחי מפה, שכנים וכו')
             while True:
                 line = await reader.readline()
                 if not line:
-                    break
+                    break  # החיבור נסגר
 
-                msg = line.decode().strip()
-
-
-                if msg.startswith("Connected|"):
-                    state.server_id = int(msg.split("|")[1])
+                data = line.decode().strip()
+                if data.startswith("ID|"):
+                    state.server_id = int(data.split("|")[1])
                     print(f"[LB] Assigned ID: {state.server_id}")
-
-
-                elif msg.startswith("UpdateStats|"):
-                    data = json.loads(msg)
-                    print(msg)
-                    print(data)
-                    state.server_area["t-l"][0] = data.split("|")[1]
-                    state.server_area["t-r"][0] = data.split("|")[2]
-
-                    print(
-                        f"[LB] Area Updated (X-Range): "
-                        f"{state.server_area['t-l'][0]} to {state.server_area['b-r'][0]}"
-                    )
-
-                elif msg.startswith("GET-WEAPON"):
+                elif data.startswith("UpdateArea|"):
                     try:
-                        parts = msg.split("|")[1:]
-                        for weapons in parts:
-                            x_str = weapons.split(",")[0]
-                            y_str = weapons.split(",")[0]
-                            w_type = weapons.split(",")[0]
-                            new_id = random.randint(1, 1000000)
-                            while new_id in state.map_weapons:
-                                new_id = random.randint(1, 1000000)
+                        area_json = data.split("|")[1].strip()
+                        state.server_area = json.loads(area_json)
 
-                            state.map_weapons[new_id] = {
-                                "x": float(x_str),
-                                "y": float(y_str),
-                                "type": w_type,
-                            }
-                    except:
-                        print("Error while getting weapons from lb")
+                        core = state.server_area.get('core', [0, 0])
+                        neighbors = state.server_area.get('neighbors', {})
 
-                elif msg.startswith("GET-MONSTER"):
-                    try:
-                        parts = msg.split("|")[1:]
-                        for monsters in parts:
-                            pixel_x = monsters.split(",")[0]
-                            pixel_y = monsters.split(",")[1]
-                            hp = monsters.split(",")[2]
-                            monster = Monster(pixel_x, pixel_y, hp)
-                            monsters_list.append(monster)
-                    except:
-                        print("Error while getting monsters from lb")
+                        print("\n" + "=" * 40)
+                        print(f"[LB UPDATE] GS-{MY_PORT} Area: {core[0]} -> {core[1]}")
+                        print(f"[LB UPDATE] Neighbors found: {list(neighbors.keys())}")
 
+                        for side, info in neighbors.items():
+                            print(f"   -> {side.upper()}: GS-{info['id']} ({info['host']}:{info['port']})")
+                        print("=" * 40 + "\n")
 
+                        for side, info in neighbors.items():
+                            asyncio.create_task(connect_to_neighbor(info['id'], info['host'], info['port']))
 
-                elif msg.startswith("GET-POTION"):
-                    try:
-                        parts = msg.split("|")[1:]
-                        for potions in parts:
-                            x_str = potions.split(",")[0]
-                            y_str = potions.split(",")[0]
-                            w_type = potions.split(",")[0]
-                            new_id = random.randint(1, 1000000)
-                            while new_id in state.map_potion:
-                                new_id = random.randint(1, 1000000)
+                    except Exception as e:
+                        print(f"[!] Error updating area: {e}")
 
-                            state.map_weapons[new_id] = {
-                                "x": float(x_str),
-                                "y": float(y_str),
-                                "type": w_type,
-                            }
-                    except:
-                        print("Error while getting potion from lb")
-
-
-
-                elif msg.startswith("TransferClient|"):
-                    _, c_id, n_ip, n_port = msg.split("|")
-
-                    for client in list(state.active_clients):
-                        if client._quic.host_cid.hex() == c_id:
-                            print(f"[LB] Sending SWITCH to client {c_id} -> {n_ip}:{n_port}")
-
-                            switch_msg = f"SWITCH|{n_ip}|{n_port}\n".encode()
-                            client._quic.send_stream_data(client.stream_id, switch_msg)
-                            client.transmit()
+            writer.close()
+            await writer.wait_closed()
 
         except Exception as e:
             print(f"[LB] Connection error: {e}. Retrying in 5 seconds...")
-            state.lb_writer = None
-            await asyncio.sleep(5)
 
-
-async def send_to_lb(message: str):
-    if state.lb_writer is not None:
-        try:
-            # חשוב להוסיף \n בסוף כדי שה-LB יוכל לקרוא עם readline()
-            if not message.endswith("\n"):
-                message += "\n"
-
-            state.lb_writer.write(message.encode())
-            await state.lb_writer.drain()
-        except Exception as e:
-            print(f"Error sending to LB: {e}")
-            state.lb_writer = None  # איפוס כדי ש-connect_to_lb ינסה להתחבר מחדש
-    else:
-        print("LB connection not available.")
+        await asyncio.sleep(5)
 
 
 async def register_with_lb_once(lb_ip: str, timeout: float = 5.0) -> bool:
     try:
         print(f"[*] Trying one-shot registration to LB {lb_ip}:{LB_PORT} ...")
-        reader, writer = await asyncio.open_connection(lb_ip, LB_PORT, limit=1024 * 1024 * 10)
+        reader, writer = await asyncio.open_connection(lb_ip, LB_PORT)
 
         connect_msg = f"Server connect|{MY_IP}|{psutil.cpu_percent()}|{MY_PORT}\n"
         writer.write(connect_msg.encode())
@@ -1260,57 +1406,35 @@ async def register_with_lb_once(lb_ip: str, timeout: float = 5.0) -> bool:
                 except:
                     pass
 
-            elif msg.startswith("UpdateStats|"):
+            elif msg.startswith("UpdateArea|"):
                 try:
-                    print(msg)
-                    parts = msg.split("|")
-                    state.server_area = {
-                        "t-l": float(parts[1]),
-                        "t-r": float(parts[2])
-                    }
-                    weapons = msg.split("|")[3]
-                    weapons = weapons.split(";")
-                    for weapon in weapons:
-                        x_str = weapon.split(",")[0]
-                        y_str = weapon.split(",")[1]
-                        w_str = weapon.split(",")[2]
-                        new_id = random.randint(1, 1000000)
-                        while new_id in state.map_weapons:
-                            new_id = random.randint(1, 1000000)
+                    payload = msg.split("|", 1)[1]
+                    area_data = json.loads(payload)
+                    state.server_area = area_data
 
-                        state.map_weapons[new_id] = {
-                            "x": float(x_str),
-                            "y": float(y_str),
-                            "type": w_str,
-                        }
-                    potions = msg.split("|")[4]
-                    potions = potions.split(";")
-                    for potion in potions:
-                        x_str = potion.split(",")[0]
-                        y_str = potion.split(",")[1]
-                        p_type = potion.split(",")[2]
+                    print(f"[LB] Received initial area: {area_data}")
 
-                        new_id = random.randint(1, 1000000)
-                        while new_id in state.map_potion:
-                            new_id = random.randint(1, 1000000)
+                    # ** don't close the writer here **
+                    # save persistent connection info so we can send heartbeats and receive updates
+                    state.lb_host = lb_ip
+                    state.lb_port = LB_PORT
+                    state.lb_writer = writer
 
-                        state.map_potion[new_id] = {
-                            "x": float(x_str),
-                            "y": float(y_str),
-                            "type": p_type,
-                        }
-
-
-                    writer.close()
-                    await writer.wait_closed()
+                    # start the heartbeat task that will keep the connection alive
+                    asyncio.create_task(update_listener(reader))
+                    asyncio.create_task(send_heartbeats_to_lb(writer))
                     return True
 
                 except Exception as e:
                     print("[LB] Failed parsing UpdateArea:", e)
                     break
 
-        writer.close()
-        await writer.wait_closed()
+        # if we get here, registration failed -> close temporary writer
+        try:
+            writer.close()
+            await writer.wait_closed()
+        except:
+            pass
 
         print("[LB] One-shot registration failed or timed out.")
         return False
@@ -1318,6 +1442,34 @@ async def register_with_lb_once(lb_ip: str, timeout: float = 5.0) -> bool:
     except Exception as e:
         print(f"[LB] Connection error in one-shot registration: {e}")
         return False
+
+
+async def update_listener(reader):
+    """משימה שרצה ברקע ומעדכנת את גבולות הגזרה של השרת"""
+    while True:
+        try:
+            line = await reader.readline()
+            if not line:
+                print("[LB] Connection closed by Load Balancer.")
+                break
+
+            msg = line.decode().strip()
+            if msg.startswith("UpdateArea|"):
+                payload = msg.split("|", 1)[1]
+                area_data = json.loads(payload)
+                state.server_area = area_data
+                print(f"[LB] Area updated: {area_data['core']}")
+
+        except Exception as e:
+            print(f"[LB] Error in listener: {e}")
+            break
+
+def broadcast_all_states(self):
+    for cid, pos in state.players_pos.items():
+        self.send_to_all(f"PLAYER_UPDATE|{cid}|{pos}|{state.players_hp[cid]}")
+
+    for cid, data in state.ghost_players.items():
+        self.send_to_all(f"PLAYER_UPDATE|{cid}|{data['pos']}|{data['hp']}")
 
 
 async def send_heartbeats_to_lb(writer):
@@ -1333,6 +1485,11 @@ async def send_heartbeats_to_lb(writer):
     except Exception as e:
         print("[LB] Heartbeat stopped:", e)
 
+skills_dict = {
+        "Speed Boost": Skill("Speed Boost", 10, 0, False),
+        "Shield": Skill("Shield", 6, 0, False),
+        "Bombs": Skill("Bombs", 7, 0, False)
+}
 
 async def main():
     while True:
@@ -1363,15 +1520,32 @@ async def main():
         configuration=config,
         create_protocol=EchoQuicProtocol,
     ))
+    print(f"[*] Game Server (QUIC) running on {MY_IP}:{MY_PORT}")
 
-    asyncio.create_task(connect_to_lb())
-    asyncio.create_task(check_cpu())
-    asyncio.create_task(monsters_manager())
-    asyncio.create_task(track_server_fps())
-    await asyncio.Future()
+    p2p_port = MY_PORT + P2P_PORT_OFFSET
+    p2p_server = await asyncio.start_server(handle_p2p_connection, MY_IP, p2p_port)
+    print(f"[*] P2P Sync Server running on {MY_IP}:{p2p_port}")
+
+    tasks = [
+        asyncio.create_task(check_cpu()),
+        asyncio.create_task(monsters_manager()),
+        asyncio.create_task(track_server_fps()),
+    ]
+
+    try:
+        await asyncio.gather(*tasks)
+    except Exception as e:
+        print(f"[CRITICAL] A core task crashed: {e}")
+    finally:
+        p2p_server.close()
+        await p2p_server.wait_closed()
+        print("[*] Server shutting down...")
 
 
 if __name__ == "__main__":
+    #spawn_loot_per_camera_zone(state.game_map)
+    #spawn_random_monsters(MONSTERS_AMOUNT)
+    #spawn_potions_per_camera_zone(state.game_map)
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
