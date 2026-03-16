@@ -1,6 +1,8 @@
 import asyncio
 import math
 import random
+from pickle import GLOBAL
+
 import psutil
 import heapq
 import time
@@ -28,6 +30,8 @@ WEAPON_LIST = [["gun", 20, TILE_SIZE * 10],["rifle" ,10 , TILE_SIZE * 20],["rpg"
 WEAPON_NAMES = [w[0] for w in WEAPON_LIST]
 WEAPON_DAMAGE = [w[1] for w in WEAPON_LIST]
 WEAPON_RANGE = [w[2] for w in WEAPON_LIST]
+BOMB_WEAPON = ["bomb", 35, 15]
+
 MONSTER_CHANGE_PATH_EVERY_SET_SECONDS = 3
 MONSTER_ACCURACY = 65  # 1-100
 MAX_POTION = 9000
@@ -35,7 +39,8 @@ POTION_LIST = [["potion", 40]] #-> name,hp++
 counter = count()
 monsters_list = []
 SERVER_FPS = 0
-SKILL_COOL_TIME = 10
+SKILL_COOL_TIME = 12
+
 def load_map():
     with open("map.txt", "r") as f:
         lines = f.readlines()
@@ -193,9 +198,17 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 return
             if len(parts) < 3:
                 return
-            weapon_slot = parts[1]
-            weapon = state.players_inventory[client_id][int(weapon_slot)]
-            if weapon in WEAPON_NAMES:
+            can_use_bombs = False
+
+            if state.players_skills[client_id].name == "Bombs" and state.players_skills[client_id].is_active == True:
+                weapon = "bomb"
+                can_use_bombs = True
+                print("bomb throw")
+            else:
+                weapon_slot = parts[1]
+                weapon = state.players_inventory[client_id][int(weapon_slot)]
+
+            if weapon in WEAPON_NAMES or can_use_bombs:
                 new_id = random.randint(1, MAX_BULLETS)
                 while new_id in state.active_bullets:
                     new_id = random.randint(1, MAX_BULLETS)
@@ -369,28 +382,27 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             try:
                 parts = data_str.split("|")
             except:
-                print("Error while splitting the CHAT command!")
+                print("Error while splitting the SKILL command!")
                 return
             if len(parts) < 3:
                 return
-            skills_dict = {
-                "Speed Boost": Skill("Speed Boost", 5, 0,  False),
-                "Shield": Skill("Shield", 5, 0,  False)
-            }
+
             try:
                 sent_skill = skills_dict[parts[1]]
             except:
                 self.disconnect()
                 return
             click_time = float(parts[2])
+            elapsed_since_last_press = click_time - state.players_skills[client_id].last_action_time
+            required_time = state.players_skills[client_id].duration_time + SKILL_COOL_TIME
 
-            if click_time - state.players_skills[client_id].last_action_time >= SKILL_COOL_TIME:
+            if elapsed_since_last_press >= required_time:
                 state.players_skills[client_id] = sent_skill
                 state.players_skills[client_id].last_action_time = click_time
                 state.players_skills[client_id].is_active = True
                 print("Skill Activated!")
+                self.broadcast_skill(client_id, state.players_skills[client_id],False)
                 asyncio.create_task(state.players_skills[client_id].timer(client_id, self.broadcast_skill))
-                self.broadcast_skill(client_id, state.players_skills[client_id].name, True,False)
             else:
                 print("Skill issue!")
 
@@ -433,8 +445,8 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             client._quic.send_stream_data(client.stream_id, msg, end_stream=False)
             client.transmit()
 
-    def broadcast_show_bullet(self, pos: str ,angle: str, bullet_id: str):
-        msg = f"SHOW-BULLET|{pos}|{angle}|{bullet_id}\n".encode()
+    def broadcast_show_bullet(self, pos: str ,angle: str, bullet_id: str, bullet_type: str):
+        msg = f"SHOW-BULLET|{pos}|{angle}|{bullet_id}|{bullet_type}\n".encode()
         for client in list(state.active_clients):
             if client.stream_id is None:
                 continue
@@ -470,8 +482,8 @@ class EchoQuicProtocol(QuicConnectionProtocol):
         print("changed! -", msg)
 
 
-    def broadcast_skill(self, sender_id: str, skill: str, is_active: bool, to_yourself: bool):
-        msg = f"SKILL|{sender_id}|{skill}|{is_active}\n".encode()
+    def broadcast_skill(self, sender_id: str, skill, to_yourself: bool):
+        msg = f"SKILL|{sender_id}|{skill.name}|{skill.is_active}\n".encode()
         for client in list(state.active_clients):
             if client == self and not to_yourself:
                 continue
@@ -507,12 +519,17 @@ class EchoQuicProtocol(QuicConnectionProtocol):
         angle = state.active_bullets[bullet_id]["angle"]
         gun_range = 0
         gun_damage = 0
-        for i in range(len(WEAPON_NAMES)):
-            if WEAPON_NAMES[i] == gun_type:
-                gun_damage = int(WEAPON_DAMAGE[i])
-                gun_range = int(WEAPON_RANGE[i])
+        if gun_type == "bomb":
+            gun_damage = BOMB_WEAPON[1]
+            gun_range = BOMB_WEAPON[2]
+        else:
+            for i in range(len(WEAPON_NAMES)):
+                if WEAPON_NAMES[i] == gun_type:
+                    gun_damage = int(WEAPON_DAMAGE[i])
+                    gun_range = int(WEAPON_RANGE[i])
+                    break
         pos = f"{x},{y}"
-        self.broadcast_show_bullet(pos , angle , str(bullet_id))
+        self.broadcast_show_bullet(pos , angle , str(bullet_id), "bomb" if gun_type == "bomb" else "bullet")
         for _ in range(gun_range):
             x, y = get_next_bullet_position(x, y, angle)
             state.active_bullets[bullet_id]["x"] = x
@@ -560,6 +577,8 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             await asyncio.sleep(BULLETS_MOVE_TIME)
 
         if bullet_id in state.active_bullets:
+            if(gun_type == "bomb"):
+                print("deleted bomb")
             del state.active_bullets[bullet_id]
             self.broadcast_del_bullet(str(bullet_id))
 
@@ -617,6 +636,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
 
 # ---------- Utils ---------- #
+
 class Node:
   def __init__(self, data):
     self.data = data
@@ -631,10 +651,12 @@ class Skill:
 
     async def timer(self, client_id, broadcast_skill):
         # Wait for the duration (this doesn't block the rest of the code)
+        print(f"timn:{self.duration_time}")
         await asyncio.sleep(self.duration_time)
-        broadcast_skill(client_id, self.name, False, False)
         # After waiting, turn it off
         self.is_active = False
+        state.players_skills[client_id] = self
+        broadcast_skill(client_id, self, False)
 
         print(f"{self.name} duration finished!")
 
@@ -899,7 +921,6 @@ def get_next_bullet_position(x, y, angle_degrees):
 
 
 def check_movement(new_pos, old_pos, skill):
-
     try:
         new_x, new_y = map(float, new_pos.split(","))
         old_x, old_y = map(float, old_pos.split(","))
@@ -910,7 +931,7 @@ def check_movement(new_pos, old_pos, skill):
     if check_if_in_map(new_x, new_y):
         if state.game_map[int(new_y / TILE_SIZE)][int(new_x / TILE_SIZE)] == ".":
             current_time = pygame.time.get_ticks() / 1000  # Get time in seconds
-            if (abs(new_x - old_x) <= 6 and abs(new_y - old_y) <= 6) or (skill.name == "Speed Boost" and current_time - skill.last_action_time + skill.duration_time <= 1):
+            if (abs(new_x - old_x) <= 6 and abs(new_y - old_y) <= 6) or (skill.name == "Speed Boost" and current_time - skill.last_action_time - skill.duration_time <= 1):
                 return True
             elif abs(new_x - old_x) <= 16 and abs(new_y - old_y) <= 16 and skill.name == "Speed Boost" and skill.is_active:
                 return True
@@ -919,30 +940,30 @@ def check_movement(new_pos, old_pos, skill):
 
 
 def spawn_random_monsters(amount):
-    tiles_high = len(state.game_map)
-    tiles_wide = len(state.game_map[0])
-    global monsters_list
-    monsters_list = []
-
-    spawned = 0
-
-    while spawned < amount:
-
-        tile_x = random.randint(0, tiles_wide - 1)
-        tile_y = random.randint(0, tiles_high - 1)
-
-        if state.game_map[tile_y][tile_x] == ".":
-
-            pixel_x = float(tile_x * TILE_SIZE)
-            pixel_y = float(tile_y * TILE_SIZE)
-
-            monster = Monster(pixel_x, pixel_y, 100)
-            monsters_list.append(monster)
-
-            spawned += 1
-
-    print(f"Server initialized with {spawned} monsters on the map.")
-
+    # tiles_high = len(state.game_map)
+    # tiles_wide = len(state.game_map[0])
+    # global monsters_list
+    # monsters_list = []
+    #
+    # spawned = 0
+    #
+    # while spawned < amount:
+    #
+    #     tile_x = random.randint(0, tiles_wide - 1)
+    #     tile_y = random.randint(0, tiles_high - 1)
+    #
+    #     if state.game_map[tile_y][tile_x] == ".":
+    #
+    #         pixel_x = float(tile_x * TILE_SIZE)
+    #         pixel_y = float(tile_y * TILE_SIZE)
+    #
+    #         monster = Monster(pixel_x, pixel_y, 100)
+    #         monsters_list.append(monster)
+    #
+    #         spawned += 1
+    #
+    # print(f"Server initialized with {spawned} monsters on the map.")
+    return
 
 def spawn_loot_per_camera_zone(game_map, per_zone=2):
     """
@@ -1165,6 +1186,11 @@ def broadcast_fps():
         client._quic.send_stream_data(client.stream_id, msg, end_stream=False)
         client.transmit()
 
+skills_dict = {
+        "Speed Boost": Skill("Speed Boost", 10, 0, False),
+        "Shield": Skill("Shield", 6, 0, False),
+        "Bombs": Skill("Bombs", 7, 0, False)
+}
 async def main():
     config = QuicConfiguration(
         is_client=False,
