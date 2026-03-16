@@ -819,7 +819,8 @@ def main():
                 item.draw(screen, camera_x, camera_y)
             player.draw(screen, camera_x, camera_y)
             for rp in remote_players.values():
-                rp.draw(screen, camera_x, camera_y)
+                rp.draw(screen, camera_x, camera_y, active_skills)
+
             for monster in monsters:
                 if camera_x - 100 <= monster.x <= camera_x + screen.get_width() + 100 and camera_y - 100 <= monster.y <= camera_y + screen.get_height() + 100:
                     monster.update()

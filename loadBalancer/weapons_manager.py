@@ -42,7 +42,7 @@ def spawn_loot_per_camera_zone(game_map, per_zone=2):
                     y = tile_y * TILE_SIZE
                     name = random.choice(WEAPON_NAMES)
                     loot_list.append((x, y, name))
-                    #create an unic id
+
                     new_id = random.randint(1, int(MAX_WEAPONS))
                     while new_id in state.map_weapons:
                         new_id = random.randint(1, int(MAX_WEAPONS))

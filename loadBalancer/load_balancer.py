@@ -1,9 +1,10 @@
 import asyncio
 import json
 import time
+
 import server
 import weapons_manager
-
+import potions_manager
 
 WIDTH = 1920 * 64
 LB_IP = "0.0.0.0"
@@ -14,6 +15,11 @@ MAP_NAME = "map.txt"
 
 servers = []
 next_server_id = 0
+
+
+def serialize_items(items_dict):
+    return ";".join([f"{id},{data['x']},{data['y']},{data['type']}"
+                     for id, data in items_dict.items()])
 
 
 async def divide_map():
@@ -47,13 +53,23 @@ async def divide_map():
             if new_min <= data["x"] < new_max
         }
 
+        relevant_potions = {
+            potion_id: data
+            for potion_id, data in potions_manager.state.map_potions.items()
+            if new_min <= data["x"] < new_max
+        }
+
         area_data = {
             "t-l": [new_min, 0],
             "b-r": [new_max, 0],
-            "loot": relevant_loot
+            "loot": relevant_loot,
+            "potions": relevant_potions
         }
 
-        update_msg = f"UpdateStats|{json.dumps(area_data)}\n"
+        loot_str = serialize_items(relevant_loot)
+        potions_str = serialize_items(relevant_potions)
+        print(loot_str, potions_str)
+        update_msg = f"UpdateStats|{new_min}|{new_max}|{loot_str}|{potions_str}\n"
 
         try:
             s.writer.write(update_msg.encode())
@@ -205,9 +221,10 @@ async def main():
         print(f"[*] Map loaded. Size: {len(game_map[0])}x{len(game_map)} tiles.")
 
         weapons_manager.spawn_loot_per_camera_zone(game_map, per_zone=2)
-        total_spawned = len(weapons_manager.state.map_weapons)
+        potions_manager.spawn_potions_per_camera_zone(game_map, per_zone=2)
 
-        print(f"[*] Success! {total_spawned} weapons spawned on walkable tiles.")
+        print(f"[*] World populated: {len(weapons_manager.state.map_weapons)} weapons, "
+              f"{len(potions_manager.state.map_potions)} potions.")
 
 
     server = await asyncio.start_server(handle_gs_lifecycle, LB_IP, LB_PORT)
@@ -218,6 +235,7 @@ async def main():
     async with server:
         await server.serve_forever()
 
+# spawn_random_monsters(MONSTERS_AMOUNT)
 
 if __name__ == "__main__":
     try:
