@@ -1434,8 +1434,8 @@ async def main():
     config.load_cert_chain("cert.pem", "key.pem")
     print("Starting QUIC server on udp:0.0.0.0:4433")
     asyncio.create_task(serve(
-        host="0.0.0.0",
-        port=4433,
+        host=MY_IP,
+        port=MY_PORT,
         configuration=config,
         create_protocol=EchoQuicProtocol,
     ))

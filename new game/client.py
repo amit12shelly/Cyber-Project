@@ -9,7 +9,6 @@ from aioquic.asyncio import connect
 from aioquic.quic.configuration import QuicConfiguration
 import client_test
 
-from server.server_game import SKILL_COOL_TIME
 
 SERVER_IP = "127.0.0.1"
 SERVER_PORT = 4433
@@ -33,16 +32,16 @@ CHAT_X = 10
 CHAT_Y_BOTTOM_OFFSET = 120
 
 
-async def quic_network_loop():
+async def quic_network_loop(host, port):
     config = QuicConfiguration(
         is_client=True,
         alpn_protocols=["echo-protocol"],
         verify_mode=False
     )
 
-    async with connect(SERVER_IP, SERVER_PORT, configuration=config) as client:
+    async with connect(host, port, configuration=config) as client:
         stream_reader, stream_writer = await client.create_stream()
-        print("Connected to server!")
+        print(f"Connected to Game Server at {host}:{port}!")
 
         async def read_from_server():
             buffer = ""
@@ -51,7 +50,9 @@ async def quic_network_loop():
                 if not data:
                     await asyncio.sleep(0.01)
                     continue
+
                 buffer += data.decode()
+
                 while "\n" in buffer:
                     msg, buffer = buffer.split("\n", 1)
                     msg = msg.strip()
@@ -69,17 +70,17 @@ async def quic_network_loop():
 
         await asyncio.gather(read_from_server(), write_to_server())
 
-def start_quic_thread():
+def start_quic_thread(ip, port):
     loop = asyncio.new_event_loop()
 
-    def runner():
+    def runner(target_ip, target_port):
         try:
             asyncio.set_event_loop(loop)
-            loop.run_until_complete(quic_network_loop())
+            loop.run_until_complete(quic_network_loop(ip, port))
         except Exception as e:
             print("NETWORK THREAD ERROR:", e)
 
-    threading.Thread(target=runner, daemon=True).start()
+    threading.Thread(target=runner, args=(ip, port), daemon=True).start()
 
 # ---------------- MAP FUNCTIONS ---------------- #
 def load_map(filename):
@@ -664,7 +665,7 @@ def draw_icons(screen, icons_lst, skill):
 # ---------------- MAIN GAME LOOP ---------------- #
 
 def main():
-    player_data = client_test.run_game_client()
+    player_data = client_test.login_client()
 
     if player_data != None:
         gs_ip = player_data["gs_ip"]
@@ -707,13 +708,17 @@ def main():
             "Bombs": Skill("Bombs", 7, 0, False)
         }
         skill = skills_dict["Shield"]
-        player = Player(128, 128, skill)
+        px = int(float(player_data.get("x", 128)))
+        py = int(float(player_data.get("y", 128)))
+        php = int(player_data.get("hp", 100))  # player hp
+        player = Player(px, py, skill)
+        player.hp = php
+
         chat_font = pygame.font.SysFont("monospace", CHAT_FONT_SIZE)
         chat_open = False
         chat_input = ""
         chat_messages = []
-        start_quic_thread()
-
+        start_quic_thread(gs_ip, gs_port)
 
         outgoing_messages.put(f"Connected|{player.x},{player.y}|{player.hp}")
         outgoing_messages.put(f"UPDATE|{player.x},{player.y}")
@@ -879,6 +884,7 @@ def main():
                     player_id = parts[1]
                     x, y = map(float, parts[2].split(","))
                     hp = int(parts[3])
+
                     if player_id == MY_ID:
                         player.hp = hp
                     else:
@@ -1005,7 +1011,6 @@ def main():
                     elif parts[2] == "Poison":
                         hp_items.append(Potion(x_potion, y_potion, poison_img, "Poison"))
 
-                        hp_items.append(Potion(x_potion,y_potion,potion_img))
                 elif parts[0] == "SKILL":
                     player_id = parts[1]
                     player_skill = parts[2]
