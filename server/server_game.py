@@ -30,7 +30,7 @@ WEAPON_LIST = [["gun", 20, TILE_SIZE * 10],["rifle" ,10 , TILE_SIZE * 20],["rpg"
 WEAPON_NAMES = [w[0] for w in WEAPON_LIST]
 WEAPON_DAMAGE = [w[1] for w in WEAPON_LIST]
 WEAPON_RANGE = [w[2] for w in WEAPON_LIST]
-BOMB_WEAPON = ["bomb", 35, 15]
+BOMB_WEAPON = ["bomb", 35, 25]
 
 WEAPON_AMMO = {"gun": 30, "rifle": 20, "rpg": 5}
 MONSTER_CHANGE_PATH_EVERY_SET_SECONDS = 3

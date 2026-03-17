@@ -84,6 +84,26 @@ def load_map(filename):
         lines = f.readlines()
     return [list(line.strip()) for line in lines]
 
+def draw_shield(screen, shield_center):
+    x, y = shield_center
+
+    shield_surface = pygame.Surface((140, 140), pygame.SRCALPHA)
+    center = (70, 70)
+
+    # זוהר חיצוני
+    pygame.draw.circle(shield_surface, (78, 149, 217, 40), center, 48, 6)
+
+    # שכבה אמצעית
+    pygame.draw.circle(shield_surface, (78, 149, 217, 100), center, 42, 4)
+
+    # שכבה פנימית בהירה
+    pygame.draw.circle(shield_surface, (150, 220, 255, 160), center, 38, 2)
+
+    # קו אנרגיה קטן בפנים
+    pygame.draw.circle(shield_surface, (200, 240, 255, 120), center, 30, 1)
+
+    screen.blit(shield_surface, (x - 70, y - 70))
+
 def draw_potion_slot(screen, potions):
     radius = 30
     y = screen.get_height() - 64 - 20 + 32
@@ -229,7 +249,126 @@ def get_nearby_item(player, loot_items, radius=70):
         if distance <= radius:
             return item
     return None
+# ---------------- ExplosionEffect CLASS ---------------- #
+class ExplosionEffect:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+        self.particles = []
+        self.smoke = []
+        self.flash = 10  # הבזק בהתחלה
 
+        # חלקיקי אש מהירים
+        for _ in range(150):
+            angle = random.uniform(0, math.pi * 2)
+            speed = random.uniform(4, 12)
+
+            self.particles.append({
+                "x": x,
+                "y": y,
+                "vx": math.cos(angle) * speed,
+                "vy": math.sin(angle) * speed,
+                "size": random.randint(6, 16),
+                "life": random.randint(25, 45),
+                "color": random.choice([
+                    (255,120,0),
+                    (255,200,0),
+                    (255,60,0)
+                ])
+            })
+
+        # עשן שמתפזר לאט
+        for _ in range(60):
+            angle = random.uniform(0, math.pi * 2)
+            speed = random.uniform(1, 4)
+
+            self.smoke.append({
+                "x": x,
+                "y": y,
+                "vx": math.cos(angle) * speed,
+                "vy": math.sin(angle) * speed,
+                "size": random.randint(10, 25),
+                "life": random.randint(40, 80)
+            })
+
+    def update(self):
+
+        # חלקיקי אש
+        for p in self.particles:
+            p["x"] += p["vx"]
+            p["y"] += p["vy"]
+
+            p["vx"] *= 0.97
+            p["vy"] *= 0.97
+
+            p["vy"] += 0.08
+            p["size"] *= 0.95
+            p["life"] -= 1
+
+        # עשן
+        for s in self.smoke:
+            s["x"] += s["vx"]
+            s["y"] += s["vy"]
+
+            s["vx"] *= 0.96
+            s["vy"] *= 0.96
+
+            s["size"] += 0.25
+            s["life"] -= 1
+
+        self.particles = [p for p in self.particles if p["life"] > 0]
+        self.smoke = [s for s in self.smoke if s["life"] > 0]
+
+        if self.flash > 0:
+            self.flash -= 1
+
+    def draw(self, screen, camera_x, camera_y):
+
+        # FLASH לבן בתחילת הפיצוץ
+        if self.flash > 0:
+            radius = 80 - self.flash * 6
+            pygame.draw.circle(
+                screen,
+                (255,255,255),
+                (int(self.x - camera_x), int(self.y - camera_y)),
+                max(10, radius)
+            )
+
+        # חלקיקי אש
+        for p in self.particles:
+            alpha = int(255 * (p["life"] / 45))
+
+            surf = pygame.Surface((int(p["size"]*2)+2, int(p["size"]*2)+2), pygame.SRCALPHA)
+
+            pygame.draw.circle(
+                surf,
+                (*p["color"], alpha),
+                (int(p["size"]), int(p["size"])),
+                max(1, int(p["size"]))
+            )
+
+            screen.blit(
+                surf,
+                (p["x"] - camera_x - p["size"], p["y"] - camera_y - p["size"])
+            )
+
+        # עשן
+        for s in self.smoke:
+            alpha = int(120 * (s["life"] / 80))
+
+            surf = pygame.Surface((int(s["size"]*2), int(s["size"]*2)), pygame.SRCALPHA)
+
+            pygame.draw.circle(
+                surf,
+                (90,90,90, alpha),
+                (int(s["size"]), int(s["size"])),
+                int(s["size"])
+            )
+
+            screen.blit(
+                surf,
+                (s["x"] - camera_x - s["size"], s["y"] - camera_y - s["size"])
+            )
 # ---------------- PoisonEffect CLASS ---------------- #
 class PoisonEffect:
     def __init__(self, x, y):
@@ -487,7 +626,7 @@ class Player:
         try:
             if active_skills[MY_ID].name == "Shield":
                 shield_center = (self.x - camera_x + 32, self.y - camera_y + 32)  # +32 to center on 64x64 sprite
-                pygame.draw.circle(screen, (78, 149, 217), shield_center, 40, 2)
+                draw_shield(screen, shield_center)
         except:
             pass
         # --- HEALTH BAR ---
@@ -606,10 +745,17 @@ def draw_fps(screen, clock, font, server_fps):
     screen.blit(client_surface, (10 + padding, 10 + padding // 2))
     screen.blit(server_surface, (10 + padding, 10 + padding + client_surface.get_height()))
 
-def draw_bullet(screen, bullet_img, x, y, angle, camera_x, camera_y):
-    rotated_bullet = pygame.transform.rotate(bullet_img, -angle)
+def draw_bullet(screen, bullet_img, x, y, angle, camera_x, camera_y,bullet_type="bullet"):
     draw_x = x - camera_x
     draw_y = y - camera_y
+
+    if bullet_type == "bomb":
+        # פצצה מסתובבת
+        rotation_angle = (pygame.time.get_ticks() // 5) % 360
+        rotated_bullet = pygame.transform.rotate(bullet_img, rotation_angle)
+    else:
+        rotated_bullet = pygame.transform.rotate(bullet_img, -angle)
+
     rect = rotated_bullet.get_rect(center=(draw_x, draw_y))
     screen.blit(rotated_bullet, rect)
 
@@ -991,6 +1137,10 @@ def main():
                 if len(parts) < 2:
                     continue
                 try:
+                    b = bullets.get(parts[1])
+                    if b and b.get("type") == "bomb":
+                        # הוסף אפקט פיצוץ במיקום הפצצה
+                        poison_effects.append(ExplosionEffect(float(b["x"]), float(b["y"])))
                     del bullets[parts[1]]
                 except:
                     pass
@@ -1145,7 +1295,7 @@ def main():
             bullet_y     = float(bullets[i]["y"])
             bullet_angle = float(bullets[i]["angle"])
             bullet_type = str(bullets[i]["type"])
-            draw_bullet(screen, bullet_img if bullet_type == "bullet" else bomb_img, bullet_x, bullet_y, bullet_angle, camera_x, camera_y)
+            draw_bullet(screen, bullet_img if bullet_type == "bullet" else bomb_img,bullet_x, bullet_y, bullet_angle, camera_x, camera_y, bullet_type)
             new_x, new_y = get_next_bullet_position(bullet_x, bullet_y, bullet_angle)
             bullets[i]["x"] = new_x
             bullets[i]["y"] = new_y
