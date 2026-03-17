@@ -503,7 +503,7 @@ class Player:
 
 
 class RemotePlayer:
-    def __init__(self, x, y, hp, sprites, id):
+    def __init__(self, x, y, hp, sprites,weapons,id):
         self.x = x
         self.y = y
         self.hp = hp
@@ -512,6 +512,8 @@ class RemotePlayer:
         self.id = id
         self.direction = "down"
         self.sprites = sprites
+        self.weapons = weapons
+        self.has_weapon = False
         self.size = 64
 
     def update_from_server(self, x, y, hp):
@@ -528,7 +530,8 @@ class RemotePlayer:
             self.direction = "down" if dy > 0 else "up"
 
     def draw(self, screen, camera_x, camera_y, active_skills):
-        screen.blit(self.sprites[self.direction][0], (self.x - camera_x, self.y - camera_y))
+        sprite_set = self.weapons if self.has_weapon else self.sprites
+        screen.blit(sprite_set[self.direction][0], (self.x - camera_x, self.y - camera_y))
         try:
             if active_skills[self.id].name == "Shield":
                 shield_center = (self.x - camera_x + 32, self.y - camera_y + 32)  # +32 to center on 64x64 sprite
@@ -877,14 +880,16 @@ def main():
                 player_id = parts[1]
                 x, y = map(float, parts[2].split(","))
                 hp = int(parts[3])
+                has_weapon = len(parts) > 4 and parts[4] == "1"
                 if player_id == MY_ID:
                     player.hp = hp
                 else:
                     if player_id not in remote_players:
-                        remote_players[player_id] = RemotePlayer(x, y, hp, player.base_sprites, player_id)
+                        remote_players[player_id] = RemotePlayer(x, y, hp, player.base_sprites,player.weapon_sprites, player_id)
                         outgoing_messages.put(f"UPDATE|{player.x},{player.y}")
                     else:
                         remote_players[player_id].update_from_server(x, y, hp)
+                    remote_players[player_id].has_weapon = has_weapon
 
             elif parts[0] == "REMOVE":
                 if len(parts) < 2:
