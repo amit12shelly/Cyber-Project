@@ -534,7 +534,7 @@ class Player:
 
 
 class RemotePlayer:
-    def __init__(self, x, y, hp, sprites):
+    def __init__(self, x, y, hp, sprites,weapon_sprites, bool):
         self.x = x
         self.y = y
         self.hp = hp
@@ -542,14 +542,17 @@ class RemotePlayer:
         self.old_y = y
         self.direction = "down"
         self.sprites = sprites
+        self.weopons = weapon_sprites
         self.size = 64
+        self.bool = bool
 
-    def update_from_server(self, x, y, hp):
+    def update_from_server(self, x, y, hp,has_weapon):
         self.old_x = self.x
         self.old_y = self.y
         self.x = x
         self.y = y
         self.hp = hp
+        self.bool = has_weapon
 
         dx = self.x - self.old_x
         dy = self.y - self.old_y
@@ -560,7 +563,10 @@ class RemotePlayer:
             self.direction = "down" if dy > 0 else "up"
 
     def draw(self, screen, camera_x, camera_y):
-        screen.blit(self.sprites[self.direction], (self.x - camera_x, self.y - camera_y))
+        if self.bool:
+            screen.blit(self.weopons[self.direction], (self.x - camera_x, self.y - camera_y))
+        else:
+            screen.blit(self.sprites[self.direction], (self.x - camera_x, self.y - camera_y))
 
         bar_width = 100
         bar_height = 5
@@ -851,15 +857,16 @@ def main():
                 player_id = parts[1]
                 x, y = map(float, parts[2].split(","))
                 hp = int(parts[3])
+                has_weapon = bool(int(parts[4])) if len(parts) > 4 else False
 
                 if player_id == MY_ID:
                     player.hp = hp
                 else:
                     if player_id not in remote_players:
-                        remote_players[player_id] = RemotePlayer(x, y, hp, player.base_sprites)
+                        remote_players[player_id] = RemotePlayer(x, y, hp, player.base_sprites,player.weapon_sprites,has_weapon)
                         outgoing_messages.put(f"UPDATE|{player.x},{player.y}")
                     else:
-                        remote_players[player_id].update_from_server(x, y, hp)
+                        remote_players[player_id].update_from_server(x, y, hp,has_weapon)
 
             elif parts[0] == "REMOVE":
                 if len(parts) < 2:
