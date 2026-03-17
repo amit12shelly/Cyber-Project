@@ -225,18 +225,40 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             if len(parts) < 3:
                 return
 
-            can_use_bombs = False
 
             if state.players_skills[client_id].name == "Bombs" and state.players_skills[client_id].is_active == True:
                 weapon = "bomb"
-                can_use_bombs = True
                 print("bomb throw")
-            else:
-                weapon_slot = int(parts[1])
-                slot_data = state.players_inventory[client_id][weapon_slot]
+                new_id = random.randint(1, MAX_BULLETS)
+                while new_id in state.active_bullets:
+                    new_id = random.randint(1, MAX_BULLETS)
+
+                pos_str = state.players_pos.get(client_id, "0,0")
+                try:
+                    x_str, y_str = pos_str.split(",")
+                except:
+                    print("Error while splitting the pos in the ATTACK command!")
+                    return
+                angle = float(parts[2])
+
+                center_x = float(x_str) + 32
+                center_y = float(y_str) + 32
+
+                state.active_bullets[new_id] = {
+                    "x": center_x + 28,
+                    "y": center_y - 8,
+                    "angle": angle,
+                }
+
+                print("shooting!")
+                asyncio.create_task(self.gun_tracking(new_id, weapon))
+                return
+
+            weapon_slot = int(parts[1])
+            slot_data = state.players_inventory[client_id][weapon_slot]
             weapon = slot_data["type"]
 
-            if weapon not in WEAPON_NAMES or can_use_bombs:
+            if weapon not in WEAPON_NAMES:
                 return
 
             # Server-side ammo check
@@ -1182,6 +1204,7 @@ async def connect_to_lb():
                                     continue
                                 client._quic.send_stream_data(client.stream_id, clients_msg, end_stream=False)
                                 client.transmit()
+                        state.map_weapons = {}
 
                         for weapon in weapons:
                             x_str = weapon.split(",")[0]
@@ -1198,7 +1221,7 @@ async def connect_to_lb():
                                 "type": w_str,
 
                             }
-                            clients_msg = f"UNDROPPED|{x_str},{y_str}|{w_str}\n".encode("utf-8")
+                            clients_msg = f"DROPPED|{x_str},{y_str}|{w_str}\n".encode("utf-8")
                             for client in list(state.active_clients):
                                 if client.stream_id is None:
                                     continue
@@ -1210,12 +1233,14 @@ async def connect_to_lb():
                         for old_potion in state.map_potion:
                             pos_str = f"{state.map_potion[old_potion]['x']},{state.map_potion[old_potion]['y']}"
                             type_str = state.map_potion[old_potion]["type"]
-                            msg = f"DROPPED|{pos_str}|{type_str}\n".encode("utf-8")
+                            msg = f"UDRROPPED|{pos_str}|{type_str}\n".encode("utf-8")
                             for client in list(state.active_clients):
                                 if client.stream_id is None:
                                     continue
                                 client._quic.send_stream_data(client.stream_id, msg, end_stream=False)
                                 client.transmit()
+
+                        state.map_potion = {}
 
 
                         for potion in potions:
