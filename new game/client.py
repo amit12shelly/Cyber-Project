@@ -90,16 +90,12 @@ def draw_shield(screen, shield_center):
     shield_surface = pygame.Surface((140, 140), pygame.SRCALPHA)
     center = (70, 70)
 
-    # זוהר חיצוני
     pygame.draw.circle(shield_surface, (78, 149, 217, 40), center, 48, 6)
 
-    # שכבה אמצעית
     pygame.draw.circle(shield_surface, (78, 149, 217, 100), center, 42, 4)
 
-    # שכבה פנימית בהירה
     pygame.draw.circle(shield_surface, (150, 220, 255, 160), center, 38, 2)
 
-    # קו אנרגיה קטן בפנים
     pygame.draw.circle(shield_surface, (200, 240, 255, 120), center, 30, 1)
 
     screen.blit(shield_surface, (x - 70, y - 70))
