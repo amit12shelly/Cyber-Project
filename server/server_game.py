@@ -195,18 +195,40 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             if len(parts) < 3:
                 return
 
-            can_use_bombs = False
 
             if state.players_skills[client_id].name == "Bombs" and state.players_skills[client_id].is_active == True:
                 weapon = "bomb"
-                can_use_bombs = True
                 print("bomb throw")
-            else:
-                weapon_slot = int(parts[1])
-                slot_data = state.players_inventory[client_id][weapon_slot]
+                new_id = random.randint(1, MAX_BULLETS)
+                while new_id in state.active_bullets:
+                    new_id = random.randint(1, MAX_BULLETS)
+
+                pos_str = state.players_pos.get(client_id, "0,0")
+                try:
+                    x_str, y_str = pos_str.split(",")
+                except:
+                    print("Error while splitting the pos in the ATTACK command!")
+                    return
+                angle = float(parts[2])
+
+                center_x = float(x_str) + 32
+                center_y = float(y_str) + 32
+
+                state.active_bullets[new_id] = {
+                    "x": center_x + 28,
+                    "y": center_y - 8,
+                    "angle": angle,
+                }
+
+                print("shooting!")
+                asyncio.create_task(self.gun_tracking(new_id, weapon))
+                return
+
+            weapon_slot = int(parts[1])
+            slot_data = state.players_inventory[client_id][weapon_slot]
             weapon = slot_data["type"]
 
-            if weapon not in WEAPON_NAMES or can_use_bombs:
+            if weapon not in WEAPON_NAMES:
                 return
 
             # Server-side ammo check
@@ -461,7 +483,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 return
             click_time = float(parts[2])
             elapsed_since_last_press = click_time - state.players_skills[client_id].last_action_time
-            required_time = state.players_skills[client_id].duration_time + SKILL_COOL_TIME
+            required_time = (0 if state.players_skills[client_id].last_action_time == 0 else state.players_skills[client_id].duration_time) + SKILL_COOL_TIME
 
             if elapsed_since_last_press >= required_time:
                 state.players_skills[client_id] = sent_skill
@@ -973,21 +995,22 @@ def check_movement(new_pos, old_pos, skill):
 
 
 def spawn_random_monsters(amount):
-    tiles_high = len(state.game_map)
-    tiles_wide = len(state.game_map[0])
-    global monsters_list
-    monsters_list = []
-    spawned = 0
-    while spawned < amount:
-        tile_x = random.randint(0, tiles_wide - 1)
-        tile_y = random.randint(0, tiles_high - 1)
-        if state.game_map[tile_y][tile_x] == ".":
-            pixel_x = float(tile_x * TILE_SIZE)
-            pixel_y = float(tile_y * TILE_SIZE)
-            monster = Monster(pixel_x, pixel_y, 100)
-            monsters_list.append(monster)
-            spawned += 1
-    print(f"Server initialized with {spawned} monsters on the map.")
+    # tiles_high = len(state.game_map)
+    # tiles_wide = len(state.game_map[0])
+    # global monsters_list
+    # monsters_list = []
+    # spawned = 0
+    # while spawned < amount:
+    #     tile_x = random.randint(0, tiles_wide - 1)
+    #     tile_y = random.randint(0, tiles_high - 1)
+    #     if state.game_map[tile_y][tile_x] == ".":
+    #         pixel_x = float(tile_x * TILE_SIZE)
+    #         pixel_y = float(tile_y * TILE_SIZE)
+    #         monster = Monster(pixel_x, pixel_y, 100)
+    #         monsters_list.append(monster)
+    #         spawned += 1
+    # print(f"Server initialized with {spawned} monsters on the map.")
+    return
 
 def spawn_loot_per_camera_zone(game_map, per_zone=2):
     loot_list = []

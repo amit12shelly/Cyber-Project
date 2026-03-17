@@ -626,7 +626,7 @@ def draw_icons(screen, icons_lst, skill):
     total_wait_required = (skill.duration_time if skill.last_action_time != 0 else 0) + SKILL_COOL_TIME
 
     padding_x = 8
-    padding_y = 10
+    padding_y = 8
     x = screen.get_width() - padding_x*2
     y = screen.get_height() - padding_y
     icons_dict = {"Shield": 0, "Speed Boost": 1, "Bombs": 2}
@@ -644,7 +644,7 @@ def draw_icons(screen, icons_lst, skill):
     skill_bar_height = 5
 
     skill_bar_x = x + padding_x
-    skill_bar_y = y - icons_lst[0].get_height() - padding_y -4  # 5px above the player
+    skill_bar_y = y - icons_lst[0].get_height() - 2 * padding_y
 
     if skill.is_active:
         skill_percent = round(
