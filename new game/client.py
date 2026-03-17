@@ -503,7 +503,7 @@ class Player:
 
 
 class RemotePlayer:
-    def __init__(self, x, y, hp, sprites,weapons,id):
+    def __init__(self, x, y, hp, sprites, id):
         self.x = x
         self.y = y
         self.hp = hp
@@ -512,8 +512,6 @@ class RemotePlayer:
         self.id = id
         self.direction = "down"
         self.sprites = sprites
-        self.weapons = weapons
-        self.has_weapon = False
         self.size = 64
 
     def update_from_server(self, x, y, hp):
@@ -530,8 +528,7 @@ class RemotePlayer:
             self.direction = "down" if dy > 0 else "up"
 
     def draw(self, screen, camera_x, camera_y, active_skills):
-        sprite_set = self.weapons if self.has_weapon else self.sprites
-        screen.blit(sprite_set[self.direction][0], (self.x - camera_x, self.y - camera_y))
+        screen.blit(self.sprites[self.direction][0], (self.x - camera_x, self.y - camera_y))
         try:
             if active_skills[self.id].name == "Shield":
                 shield_center = (self.x - camera_x + 32, self.y - camera_y + 32)  # +32 to center on 64x64 sprite
@@ -663,6 +660,62 @@ def draw_icons(screen, icons_lst, skill):
 
 # ---------------- MAIN GAME LOOP ---------------- #
 
+def draw_death_screen(screen, font_title, font_btn, mouse_pos):
+    sw, sh = screen.get_width(), screen.get_height()
+
+    # Same dim overlay used by draw_big_inventory
+    overlay = pygame.Surface((sw, sh), pygame.SRCALPHA)
+    overlay.fill((0, 0, 0, 180))
+    screen.blit(overlay, (0, 0))
+
+    # Central panel — same style as draw_big_inventory
+    panel_w, panel_h = 500, 300
+    px = (sw - panel_w) // 2
+    py = (sh - panel_h) // 2
+
+    panel = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+    panel.fill((0, 0, 0, 200))
+    screen.blit(panel, (px, py))
+    pygame.draw.rect(screen, (150, 150, 150), (px, py, panel_w, panel_h), 2)
+
+    # Title — white, same font style as inventory labels
+    title = font_title.render("YOU DIED", True, (255, 255, 255))
+    screen.blit(title, title.get_rect(center=(sw // 2, py + 70)))
+
+    # Subtitle in dimmed white
+    sub_font = pygame.font.SysFont("arial", 18)
+    sub = sub_font.render("Your items were dropped at your location.", True, (180, 180, 180))
+    screen.blit(sub, sub.get_rect(center=(sw // 2, py + 130)))
+
+    # Two buttons styled as inventory slots
+    btn_w, btn_h = 160, 50
+    gap = 20
+    total = btn_w * 2 + gap
+    b1x = sw // 2 - total // 2
+    b2x = b1x + btn_w + gap
+    by  = py + 200
+
+    result = None
+    for label, bx, key in [("RESPAWN", b1x, "respawn"), ("QUIT", b2x, "quit")]:
+        r = pygame.Rect(bx, by, btn_w, btn_h)
+        hovered = r.collidepoint(mouse_pos)
+
+        # Slot fill — brighter on hover, matching (50,50,50) slot style
+        fill = (80, 80, 80) if hovered else (50, 50, 50)
+        pygame.draw.rect(screen, fill, r)
+        # Inner border — same (200,200,200) as inventory slots; yellow on hover like selected slot
+        border_color = (255, 255, 0) if hovered else (200, 200, 200)
+        pygame.draw.rect(screen, border_color, (r.x + 2, r.y + 2, r.w - 4, r.h - 4), 2)
+
+        lbl = font_btn.render(label, True, (255, 255, 255))
+        screen.blit(lbl, lbl.get_rect(center=r.center))
+
+        if hovered and pygame.mouse.get_pressed()[0]:
+            result = key
+
+    return result
+
+
 def main():
     global MY_ID
     global SKILL_COOL_TIME
@@ -706,6 +759,9 @@ def main():
     chat_open = False
     chat_input = ""
     chat_messages = []
+    is_dead = False
+    death_font_title = pygame.font.SysFont("arial", 48, bold=True)
+    death_font_btn   = pygame.font.SysFont("arial", 22)
     start_quic_thread()
 
 
@@ -740,6 +796,9 @@ def main():
             if event.type == pygame.QUIT:
                 outgoing_messages.put("Disconnected")
                 running = False
+
+            if is_dead:
+                continue
 
             if event.type == pygame.KEYDOWN:
                 if chat_open:
@@ -863,7 +922,7 @@ def main():
 
                     outgoing_messages.put(f"ATTACK|{player.selected_slot}|{angle_degrees}")
 
-        if not chat_open:
+        if not chat_open and not is_dead:
             keys = pygame.key.get_pressed()
             player.move(keys, game_map, tile_size, skill)
 
@@ -880,16 +939,14 @@ def main():
                 player_id = parts[1]
                 x, y = map(float, parts[2].split(","))
                 hp = int(parts[3])
-                has_weapon = len(parts) > 4 and parts[4] == "1"
                 if player_id == MY_ID:
                     player.hp = hp
                 else:
                     if player_id not in remote_players:
-                        remote_players[player_id] = RemotePlayer(x, y, hp, player.base_sprites,player.weapon_sprites, player_id)
+                        remote_players[player_id] = RemotePlayer(x, y, hp, player.base_sprites, player_id)
                         outgoing_messages.put(f"UPDATE|{player.x},{player.y}")
                     else:
                         remote_players[player_id].update_from_server(x, y, hp)
-                    remote_players[player_id].has_weapon = has_weapon
 
             elif parts[0] == "REMOVE":
                 if len(parts) < 2:
@@ -897,11 +954,31 @@ def main():
                 player_id = parts[1]
                 if player_id in remote_players:
                     del remote_players[player_id]
-                    if player_id == MY_ID:
-                        pygame.quit(); exit()
-                else:
-                    if player_id == MY_ID:
-                        pygame.quit(); exit()
+                if player_id == MY_ID:
+                    pygame.quit(); exit()
+
+            elif parts[0] == "DEAD":
+                is_dead = True
+                bullets.clear()
+                monsters.clear()
+
+            elif parts[0] == "RESPAWNED":
+                if len(parts) < 3:
+                    continue
+                rx, ry = map(float, parts[1].split(","))
+                player.x, player.y = int(rx), int(ry)   # int() fixes draw_map range() crash
+                player.hp = int(parts[2])
+                player.inventory = []
+                player.selected_slot = 0
+                skill = skills_dict["Shield"]
+                skill.is_active = False
+                skill.last_action_time = 0
+                active_skills.pop(MY_ID, None)
+                inventory.clear()
+                bullets.clear()
+                monsters.clear()
+                is_dead = False
+                outgoing_messages.put(f"UPDATE|{player.x},{player.y}")
 
             elif parts[0] == "SHOW-BULLET":
                 if len(parts) < 5:
@@ -1090,6 +1167,14 @@ def main():
         draw_potion_slot(screen, inventory)
         if inventory_open:
             draw_big_inventory(screen, player, inventory, ui_font)
+
+        if is_dead:
+            action = draw_death_screen(screen, death_font_title, death_font_btn, pygame.mouse.get_pos())
+            if action == "respawn":
+                outgoing_messages.put("RESPAWN")
+            elif action == "quit":
+                outgoing_messages.put("Disconnected")
+                pygame.quit(); exit()
 
         pygame.display.flip()
         clock.tick(60)

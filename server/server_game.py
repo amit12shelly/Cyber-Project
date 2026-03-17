@@ -41,6 +41,8 @@ counter = count()
 monsters_list = []
 SERVER_FPS = 0
 SKILL_COOL_TIME = 12
+SPAWN_X = 128  # adjust to a safe open tile on your map
+SPAWN_Y = 128
 
 def load_map():
     with open("map.txt", "r") as f:
@@ -490,6 +492,19 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             else:
                 print("Skill issue!")
 
+        # RESPAWN
+        elif data_str == "RESPAWN":
+            spawn_pos = f"{SPAWN_X},{SPAWN_Y}"
+            state.players_pos[client_id]       = spawn_pos
+            state.players_hp[client_id]        = 100
+            state.players_inventory[client_id] = {int(i): {"type": "none", "ammo": 0} for i in range(INVENTORY_SIZE)}
+            state.players_potions[client_id]   = 0
+            state.players_skills[client_id]    = Skill("Speed Boost", 5, 0, False)
+            if self.stream_id is not None:
+                self._quic.send_stream_data(self.stream_id, f"RESPAWNED|{spawn_pos}|100\n".encode(), end_stream=False)
+                self.transmit()
+            self.broadcast_player(client_id, spawn_pos, 100, False)
+
         # DISCONNECT
         elif data_str == "Disconnected":
             self.disconnect()
@@ -699,22 +714,36 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                     dropped += 1
                 inv_slot += 1
 
-            self.broadcast_remove(client_id)
+            # Send DEAD only to the dying player (keeps connection open for respawn)
+            dead_client = None
+            for client in state.active_clients:
+                if client._quic.host_cid.hex() == client_id:
+                    dead_client = client
+                    break
+            if dead_client and dead_client.stream_id is not None:
+                dead_client._quic.send_stream_data(dead_client.stream_id, b"DEAD\n", end_stream=False)
+                dead_client.transmit()
 
+            # Send REMOVE to everyone else
+            remove_msg = f"REMOVE|{client_id}\n".encode()
+            for client in list(state.active_clients):
+                if client is dead_client or client.stream_id is None:
+                    continue
+                client._quic.send_stream_data(client.stream_id, remove_msg, end_stream=False)
+                client.transmit()
+
+            # Wipe state but keep connection alive for RESPAWN/Disconnected
             if client_id in state.players_pos:
                 del state.players_pos[client_id]
             if client_id in state.players_hp:
                 del state.players_hp[client_id]
             if client_id in state.players_inventory:
                 del state.players_inventory[client_id]
-
-            client_to_remove = None
-            for client in state.active_clients:
-                if client._quic.host_cid.hex() == client_id:
-                    client_to_remove = client
-                    break
-            if client_to_remove:
-                state.active_clients.remove(client_to_remove)
+            if client_id in state.players_potions:
+                del state.players_potions[client_id]
+            if client_id in state.players_skills:
+                del state.players_skills[client_id]
+            # NOTE: do NOT remove from state.active_clients
             print("player killed!")
         else:
             state.players_hp[client_id] = hp - damage
