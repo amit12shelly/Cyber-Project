@@ -183,6 +183,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 return
             self.player_id = parts[1]
             client_id = self.player_id
+            state.players_control[client_id] = parts[2]
 
         # MOVEMENT
         elif data_str.startswith("UPDATE|"):
@@ -280,6 +281,12 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 print("player has been kicked! movement problem")
 
         # ATTACK
+        elif data_str.startswith("CHANGECONTROL|"):
+            parts = data_str.split("|")
+            if len(parts) == 2:
+                state.players_control[client_id] = parts[1]
+
+
         elif data_str.startswith("ATTACK|"):
             try:
                 parts = data_str.split("|")
