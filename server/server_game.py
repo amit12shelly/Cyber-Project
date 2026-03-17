@@ -1261,8 +1261,9 @@ async def register_with_lb_once(lb_ip: str, timeout: float = 5.0) -> bool:
 
             elif msg.startswith("UpdateStats|"):
                 try:
+                    print(msg)
                     parts = msg.split("|")
-                    if len(parts) < 5:
+                    if len(parts) < 7:
                         print(f"wrong msg from lb - only {len(parts)} parts")
                     border_l = parts[1]
                     border_r = parts[2]
@@ -1270,9 +1271,9 @@ async def register_with_lb_once(lb_ip: str, timeout: float = 5.0) -> bool:
                         state.server_area_left =  border_l
                     if border_r != "None":
                         state.server_area_right = border_r
-
-                    weapons = parts[3]
+                    weapons = parts[5]
                     weapons = weapons.split(";")
+
                     for weapon in weapons:
                         x_str = weapon.split(",")[0]
                         y_str = weapon.split(",")[1]
@@ -1286,7 +1287,7 @@ async def register_with_lb_once(lb_ip: str, timeout: float = 5.0) -> bool:
                             "y": float(y_str),
                             "type": w_str,
                         }
-                    potions = msg.split("|")[4]
+                    potions = msg.split("|")[6]
                     potions = potions.split(";")
                     for potion in potions:
                         x_str = potion.split(",")[0]
