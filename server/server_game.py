@@ -55,7 +55,8 @@ class GameState:
         self.lb_writer = None
 
         self.server_id = None
-        self.server_area = None
+        self.server_area_left = None
+        self.server_area_right = None
 
         #------ Game server neighbors -----
 
@@ -166,6 +167,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
             if self._quic.host_cid.hex() not in state.players_pos:
                 return
+
             for other_id, other_pos in list(state.players_pos.items()):
                 if other_id == self._quic.host_cid.hex():
                     continue
@@ -176,8 +178,18 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
             if check_movement(new_pos, state.players_pos[self._quic.host_cid.hex()]):
                 state.players_pos[self._quic.host_cid.hex()] = new_pos
-                self.broadcast_player(self._quic.host_cid.hex(), new_pos, state.players_hp[self._quic.host_cid.hex()],
-                                      False)
+                if float(new_pos.split(",")[0]) < state.server_area_left:
+                    msg = f"SWITCHED|{state.neighbor["left"]["ip"]}|{state.neighbor["left"]["port"]}\n".encode()
+                    self._quic.send_stream_data(self.stream_id, msg, end_stream=False)
+                    self.transmit()
+                    self.disconnect()
+                elif float(new_pos.split(",")[0]) > state.server_area_right:
+                    msg = f"SWITCHED|{state.neighbor["right"]["ip"]}|{state.neighbor["right"]["port"]}\n".encode()
+                    self._quic.send_stream_data(self.stream_id, msg, end_stream=False)
+                    self.transmit()
+                    self.disconnect()
+
+                self.broadcast_player(self._quic.host_cid.hex(), new_pos, state.players_hp[self._quic.host_cid.hex()],False)
             else:
                 self.disconnect() #kick the player
                 print("player has been kicked! movement problem")
@@ -977,7 +989,7 @@ async def monsters_manager():
                 monster.path = None
                 continue
                 t-l(x,0)
-            if monster.x < state.server_area["t-l"][0] or monster.x > state.server_area["t-r"][0]:
+            if monster.x < state.server_area_left or monster.x > state.server_area_right:
                 msg = f"CHANGE-MONSTER|{monster.x}|{monster.y}|{monster.weapon}"
                 await send_to_lb(msg)
                 del monster
@@ -1136,13 +1148,22 @@ async def connect_to_lb():
 
                     try:
                         parts = msg.split("|")
-                        state.server_area = {
-                            "t-l": float(parts[1]),
-                            "t-r": float(parts[2])
-                        }
+                        state.server_area_left = float(parts[1])
+                        state.server_area_right = float(parts[1])
 
-                        weapons = msg.split("|")[3]
+                        state.neighbor["left"]["ip"] = parts[3].split(",")[0]
+                        state.neighbor["left"]["port"] = parts[3].split(",")[1]
+
+                        state.neighbor["right"]["ip"] = parts[4].split(",")[0]
+                        state.neighbor["right"]["port"] = parts[4].split(",")[1]
+
+                        weapons = msg.split("|")[5]
                         weapons = weapons.split(";")
+
+                        for weapon in state.map_weapons:
+
+                            del weapon
+
 
                         for weapon in weapons:
                             x_str = weapon.split(",")[0]
@@ -1160,7 +1181,7 @@ async def connect_to_lb():
 
                             }
 
-                        potions = msg.split("|")[4]
+                        potions = msg.split("|")[6]
                         potions = potions.split(";")
 
                         for potion in potions:
@@ -1300,12 +1321,29 @@ async def register_with_lb_once(lb_ip: str, timeout: float = 5.0) -> bool:
 
             elif msg.startswith("UpdateStats|"):
                 try:
+                    print(msg)
                     parts = msg.split("|")
-                    state.server_area = {
-                        "t-l": float(parts[1]),
-                        "t-r": float(parts[2])
-                    }
-                    weapons = msg.split("|")[3]
+                    state.server_area_left = float(parts[1])
+                    state.server_area_right = float(parts[1])
+
+                    state.neighbor["left"] = {}
+                    state.neighbor["right"] = {}
+
+                    if parts[3].split(",")[0] == "None":
+                        state.neighbor["left"]["ip"] = None
+                        state.neighbor["left"]["port"] = None
+                    else:
+                        state.neighbor["left"]["ip"] = parts[3].split(",")[0]
+                        state.neighbor["left"]["port"] = parts[3].split(",")[1]
+                    if parts[4].split(",")[0] == "None":
+                        state.neighbor["right"]["ip"] = None
+                        state.neighbor["right"]["port"] = None
+                    else:
+                        state.neighbor["right"]["ip"] = parts[4].split(",")[0]
+                        state.neighbor["right"]["port"] = parts[4].split(",")[1]
+
+
+                    weapons = msg.split("|")[5]
                     weapons = weapons.split(";")
                     for weapon in weapons:
                         x_str = weapon.split(",")[0]
@@ -1320,7 +1358,7 @@ async def register_with_lb_once(lb_ip: str, timeout: float = 5.0) -> bool:
                             "y": float(y_str),
                             "type": w_str,
                         }
-                    potions = msg.split("|")[4]
+                    potions = msg.split("|")[6]
                     potions = potions.split(";")
                     for potion in potions:
                         x_str = potion.split(",")[0]
