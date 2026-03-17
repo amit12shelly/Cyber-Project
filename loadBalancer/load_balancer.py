@@ -174,7 +174,7 @@ async def handle_gs_lifecycle(reader, writer):
                         s.last_seen = time.time()
 
                         # אם ה-CPU השתנה משמעותית -> מחלקים מחדש
-                        if abs(old_cpu - cpu_load) > 10:
+                        if abs(old_cpu - cpu_load) > 100:
                             await divide_map()
                         break
 

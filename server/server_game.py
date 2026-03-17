@@ -75,6 +75,7 @@ class GameState:
     server_id = None
     server_area_left = None
     server_area_right = None
+    pending_lb_updates = []
 
     #game info
     map_weapons = {}  # weapon_id -> {x, y, type}
@@ -199,18 +200,24 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 state.players_pos[client_id] = new_pos
                 self.broadcast_player(client_id, new_pos, state.players_hp[client_id], False)
                 new_x = new_pos.split(",")[0]
-                if new_x < state.server_area_left:
-                    msg = f"SWITCHED|{state.neighbor["left"].split(",")[0]}|{state.neighbor["left"].split(",")[1]}\n".encode()
-                    self._quic.send_stream_data(self.stream_id, msg, end_stream=False)
-                    self.transmit()
-                    self.broadcast_remove(client_id)
-                    self.disconnect()
-                if new_x > state.server_area_right:
-                    msg = f"SWITCHED|{state.neighbor["right"].split(",")[0]}|{state.neighbor["right"].split(",")[1]}\n".encode()
-                    self._quic.send_stream_data(self.stream_id, msg, end_stream=False)
-                    self.transmit()
-                    self.broadcast_remove(client_id)
-                    self.disconnect()
+                if state.neighbor['left'] is not None:
+                    if new_x < state.server_area_left:
+                        nei_ip = state.neighbor['left'].split(',')[0]
+                        nei_port = state.neighbor['left'].split(',')[1]
+                        msg = f"SWITCHED|{nei_ip}|{nei_port}\n".encode()
+                        self._quic.send_stream_data(self.stream_id, msg, end_stream=False)
+                        self.transmit()
+                        self.broadcast_remove(client_id)
+                        self.disconnect()
+                if state.neighbor['right'] is not None:
+                    if new_x > state.server_area_right:
+                        nei_ip = state.neighbor['right'].split(',')[0]
+                        nei_port = state.neighbor['right'].split(',')[1]
+                        msg = f"SWITCHED|{nei_ip}|{nei_port}\n".encode()
+                        self._quic.send_stream_data(self.stream_id, msg, end_stream=False)
+                        self.transmit()
+                        self.broadcast_remove(client_id)
+                        self.disconnect()
             else:
                 self.disconnect()
                 print("player has been kicked! movement problem")
@@ -344,6 +351,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                             }
                             pos_str = f"{state.map_weapons[found_weapon_id]['x']},{state.map_weapons[found_weapon_id]['y']}"
                             self.broadcast_undrop(pos_str, state.map_weapons[found_weapon_id]["type"])
+                            state.pending_lb_updates.append(f"REMOVE:{pos_str},{state.map_weapons[found_weapon_id]["type"]}")
                             del state.map_weapons[found_weapon_id]
                             break
                 else:
@@ -386,6 +394,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 pos_str = f"{state.map_potion[found_potion_id]['x']},{state.map_potion[found_potion_id]['y']}"
                 self.broadcast_undrop(pos_str, pickup_type)
                 self.broadcast_player(client_id, state.players_pos[client_id], state.players_hp[client_id], False)
+                state.pending_lb_updates.append(f"REMOVE:{pos_str},{pickup_type}")
                 del state.map_potion[found_potion_id]
             else:
                 self.disconnect()
@@ -478,6 +487,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                         "type": drop,
                     }
                     self.broadcast_drop(pos_str, drop, False)
+                    state.pending_lb_updates.append(f"ADD:{pos_str},{drop}")
                 else:
                     self.disconnect()
                     print("player has been kicked! player does not have this weapon")
@@ -495,6 +505,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             if len(parts) < 2:
                 return
             msg = parts[1]
+            state.pending_lb_updates.append(f"CHAT:{msg},{client_id}")
             self.broadcast_chat(msg, client_id)
 
         elif data_str.startswith("SKILL|"):
@@ -1142,6 +1153,10 @@ async def connect_to_lb():
             state.lb_writer = writer
 
             connect_msg = f"Server connect|{MY_IP}|{psutil.cpu_percent()}|{MY_PORT}\n"
+            to_send = state.pending_lb_updates
+            for report in to_send:
+                connect_msg += "|" + report
+
             writer.write(connect_msg.encode())
             await writer.drain()
 
