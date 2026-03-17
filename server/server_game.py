@@ -1271,6 +1271,7 @@ async def connect_to_lb():
             to_send = state.pending_lb_updates
             for report in to_send:
                 connect_msg += "|" + report
+                state.pending_lb_updates.remove(report)
 
             writer.write(connect_msg.encode())
             await writer.drain()
