@@ -83,6 +83,28 @@ def load_map(filename):
         lines = f.readlines()
     return [list(line.strip()) for line in lines]
 
+def draw_potion_slot(screen, potions):
+    radius = 30  # גודל העיגול
+
+    # אותו גובה כמו ה-weapon slots
+    y = screen.get_height() - 64 - 20 + 32
+
+    # קצת יותר ימינה
+    x = 60
+
+    # רקע
+    pygame.draw.circle(screen, (50, 50, 50), (x, y), radius)
+
+    # מסגרת לבנה
+    pygame.draw.circle(screen, (255, 255, 0), (x, y), radius, 3)
+
+    # אם יש item ב-inventory
+    if len(potions) > 0:
+        item = potions[0]
+
+        img = pygame.transform.scale(item.image, (radius*2-12, radius*2-12))
+        rect = img.get_rect(center=(x, y))
+        screen.blit(img, rect)
 def draw_map(screen, game_map, tile_size, camera_x, camera_y,floor_img, wall_img):
         start_tile_x = max(camera_x // tile_size, 0)
         start_tile_y = max(camera_y // tile_size, 0)
@@ -650,7 +672,7 @@ def main():
         "gun": pygame.transform.scale(pygame.image.load("img/rightWeapon1.png").convert_alpha(), (64, 64)),
         "rpg": pygame.transform.scale(pygame.image.load("img/rpg_right.png").convert_alpha(), (64, 64))
     }
-    monster_img = pygame.transform.scale(pygame.image.load("img/monster_down.png").convert_alpha(), (64, 64))
+    monster_img = pygame.transform.scale(pygame.image.load("img/monster_down.png").convert_alpha(), (45, 45))
     potion_img =  pygame.transform.scale(pygame.image.load("img/hp_Potion.png").convert_alpha(), (40, 40))
     poison_img =  pygame.transform.scale(pygame.image.load("img/poison_item.png").convert_alpha(), (40, 40))
     
@@ -841,7 +863,6 @@ def main():
 
                 if len(parts) < 3:
                     continue
-
                 x_dropped, y_dropped = parts[1].split(",")
                 x_dropped = float(x_dropped)
                 y_dropped = float(y_dropped)
@@ -866,15 +887,15 @@ def main():
                 y_pick = float(y_pick)
                 type_pick = parts[2]
 
-                if type_pick != "Potion":
-                    for item in loot_items:
-                        if item.x==x_pick and item.y == y_pick and item.name == type_pick:
-                            loot_items.remove(item)
+                if type_pick in ("Potion", "Poison"):
+                    for potion in hp_items:
+                        if potion.x == x_pick and potion.y == y_pick and potion.name == type_pick:
+                            hp_items.remove(potion)
                             break
                 else:
-                    for potion in hp_items:
-                        if potion.x==x_pick and potion.y == y_pick:
-                            hp_items.remove(potion)
+                    for item in loot_items:
+                        if item.x == x_pick and item.y == y_pick and item.name == type_pick:
+                            loot_items.remove(item)
                             break
 
             elif parts[0] == "CHAT":
@@ -976,6 +997,7 @@ def main():
         draw_fps(screen, clock, chat_font, server_fps)
         draw_inventory(screen, player)
         draw_chat(screen, chat_font, chat_messages, chat_open, chat_input)
+        draw_potion_slot(screen, inventory)
         if inventory_open:
             draw_big_inventory(screen, player, inventory, ui_font)
         pygame.display.flip()
