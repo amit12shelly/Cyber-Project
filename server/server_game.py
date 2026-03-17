@@ -475,7 +475,8 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             client.transmit()
 
     def broadcast_player(self, sender_id: str, pos_str: str, hp, to_yourself: bool):
-        msg = f"UPDATE|{sender_id}|{pos_str}|{hp}\n".encode()
+        has_weapon = any(v != "none" for v in state.players_inventory[sender_id].values())
+        msg = f"UPDATE|{sender_id}|{pos_str}|{hp}|{int(has_weapon)}\n".encode()
         for client in list(state.active_clients):
             if client == self and not to_yourself:
                 continue
