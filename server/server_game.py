@@ -28,13 +28,13 @@ SCREEN_HEIGHT = 1080
 MAX_WEAPONS = 9000
 AMOUNT_TO_DROP_IN_DEATH = 2
 ENTITIES_SPEED = 4
-WEAPON_LIST = [["gun", 20, TILE_SIZE * 10],["rifle" ,10 , TILE_SIZE * 20],["rpg",30,TILE_SIZE*25]]
+WEAPON_LIST = [["gun", 20, TILE_SIZE * 10],["rifle" ,10 , TILE_SIZE * 20],["rpg",30,TILE_SIZE*25], ["knife", 35, 5]]
 WEAPON_NAMES = [w[0] for w in WEAPON_LIST]
 WEAPON_DAMAGE = [w[1] for w in WEAPON_LIST]
 WEAPON_RANGE = [w[2] for w in WEAPON_LIST]
 BOMB_WEAPON = ["bomb", 35, 15]
 
-WEAPON_AMMO = {"gun": 30, "rifle": 20, "rpg": 5}
+WEAPON_AMMO = {"gun": 30, "rifle": 20, "rpg": 5, "knife": 12}
 MONSTER_CHANGE_PATH_EVERY_SET_SECONDS = 3
 MONSTER_ACCURACY = 65
 MAX_POTION = 9000
@@ -229,6 +229,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             weapon = slot_data["type"]
 
             if weapon not in WEAPON_NAMES:
+                print("unrecognized ammo")
                 return
 
             # Server-side ammo check
@@ -626,9 +627,10 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                     gun_range = int(WEAPON_RANGE[i])
                     break
         pos = f"{x},{y}"
-        self.broadcast_show_bullet(pos, angle, str(bullet_id), "bomb" if gun_type == "bomb" else "bullet")
+        print(f"gn: {gun_type}")
+        self.broadcast_show_bullet(pos, angle, str(bullet_id), "bomb" if gun_type == "bomb" else "knife" if gun_type == "knife" else "bullet")
         for _ in range(gun_range):
-            x, y = get_next_bullet_position(x, y, angle)
+            x, y = get_next_bullet_position(x, y, angle, 15 if gun_type == "bullet" else 5)
             state.active_bullets[bullet_id]["x"] = x
             state.active_bullets[bullet_id]["y"] = y
 
@@ -838,7 +840,7 @@ async def monster_gun_tracking(bullet_id: int, gun_type: str, start_x: float, st
             client.transmit()
 
     for _ in range(gun_range):
-        x, y = get_next_bullet_position(x, y, angle)
+        x, y = get_next_bullet_position(x, y, angle, 15 if gun_type == "bullet" else 5)
         if bullet_id in state.active_bullets:
             state.active_bullets[bullet_id]["x"] = x
             state.active_bullets[bullet_id]["y"] = y
@@ -971,9 +973,9 @@ def A_star_algorythm(start, target, desired_range):
 
     return None
 
-def get_next_bullet_position(x, y, angle_degrees):
+def get_next_bullet_position(x, y, angle_degrees, speed):
     angle_rad = math.radians(angle_degrees)
-    return x + math.cos(angle_rad) * 15, y + math.sin(angle_rad) * 15
+    return x + math.cos(angle_rad) * speed, y + math.sin(angle_rad) * speed
 
 def check_movement(new_pos, old_pos, skill):
     try:
@@ -995,22 +997,21 @@ def check_movement(new_pos, old_pos, skill):
 
 
 def spawn_random_monsters(amount):
-    # tiles_high = len(state.game_map)
-    # tiles_wide = len(state.game_map[0])
-    # global monsters_list
-    # monsters_list = []
-    # spawned = 0
-    # while spawned < amount:
-    #     tile_x = random.randint(0, tiles_wide - 1)
-    #     tile_y = random.randint(0, tiles_high - 1)
-    #     if state.game_map[tile_y][tile_x] == ".":
-    #         pixel_x = float(tile_x * TILE_SIZE)
-    #         pixel_y = float(tile_y * TILE_SIZE)
-    #         monster = Monster(pixel_x, pixel_y, 100)
-    #         monsters_list.append(monster)
-    #         spawned += 1
-    # print(f"Server initialized with {spawned} monsters on the map.")
-    return
+    tiles_high = len(state.game_map)
+    tiles_wide = len(state.game_map[0])
+    global monsters_list
+    monsters_list = []
+    spawned = 0
+    while spawned < amount:
+        tile_x = random.randint(0, tiles_wide - 1)
+        tile_y = random.randint(0, tiles_high - 1)
+        if state.game_map[tile_y][tile_x] == ".":
+            pixel_x = float(tile_x * TILE_SIZE)
+            pixel_y = float(tile_y * TILE_SIZE)
+            monster = Monster(pixel_x, pixel_y, 100)
+            monsters_list.append(monster)
+            spawned += 1
+    print(f"Server initialized with {spawned} monsters on the map.")
 
 def spawn_loot_per_camera_zone(game_map, per_zone=2):
     loot_list = []

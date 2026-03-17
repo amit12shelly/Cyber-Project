@@ -19,7 +19,7 @@ incoming_messages = Queue()
 outgoing_messages = Queue()
 import time
 
-WEAPON_AMMO = {"gun": 30, "rifle": 20, "rpg": 5}  # must match server
+WEAPON_AMMO = {"gun": 30, "rifle": 20, "rpg": 5, "knife": 12}  # must match server
 
 CHAT_MAX_MESSAGES = 10
 CHAT_FADE_SECONDS = 8
@@ -480,10 +480,10 @@ class Player:
         self._update_animation()
 
     def draw(self, screen, camera_x, camera_y, active_skills):
-        if self.has_weapon_equipped():
-            sprite = self.weapon_sprites[self.direction][self.anim_frame]
+        if self.has_weapon_equipped() and self.inventory[self.selected_slot].name != "knife":
+            sprite = self.weapon_sprites[self.direction][0]
         else:
-            sprite = self.base_sprites[self.direction][self.anim_frame]
+            sprite = self.base_sprites[self.direction][0]
 
         screen.blit(sprite, (self.x - camera_x, self.y - camera_y))
         try:
@@ -712,7 +712,8 @@ def main():
     weapon_images = {
         "rifle": pygame.transform.scale(pygame.image.load("img/leftWeapon1.png").convert_alpha(), (64, 64)),
         "gun":   pygame.transform.scale(pygame.image.load("img/rightWeapon1.png").convert_alpha(), (64, 64)),
-        "rpg":   pygame.transform.scale(pygame.image.load("img/rpg_right.png").convert_alpha(), (64, 64))
+        "rpg":   pygame.transform.scale(pygame.image.load("img/rpg_right.png").convert_alpha(), (64, 64)),
+        "knife": pygame.transform.scale(pygame.image.load("img/knife.png").convert_alpha(), (56, 64)),
     }
     monster_img = pygame.transform.scale(pygame.image.load("img/monster_down.png").convert_alpha(), (45, 45))
     potion_img  = pygame.transform.scale(pygame.image.load("img/hp_Potion.png").convert_alpha(), (40, 40))
@@ -1055,7 +1056,8 @@ def main():
             bullet_y     = float(bullets[i]["y"])
             bullet_angle = float(bullets[i]["angle"])
             bullet_type = str(bullets[i]["type"])
-            draw_bullet(screen, bullet_img if bullet_type == "bullet" else bomb_img, bullet_x, bullet_y, bullet_angle, camera_x, camera_y)
+            print(bullet_type)
+            draw_bullet(screen, bullet_img if bullet_type == "bullet" else bomb_img if bullet_type == "bomb" else weapon_images["knife"], bullet_x, bullet_y, bullet_angle, camera_x, camera_y)
             new_x, new_y = get_next_bullet_position(bullet_x, bullet_y, bullet_angle)
             bullets[i]["x"] = new_x
             bullets[i]["y"] = new_y
