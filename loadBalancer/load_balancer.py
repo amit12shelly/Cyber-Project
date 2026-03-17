@@ -1,5 +1,4 @@
 import asyncio
-import json
 import time
 
 import server
@@ -47,6 +46,18 @@ async def divide_map():
         s.set_x_min(new_min)
         s.set_x_max(new_max)
 
+        if i > 0:
+            left_s = servers[i - 1]
+            left_neighbor = f"{left_s.ip}:{left_s.port}"
+        else:
+            left_neighbor = "None"
+
+        if i < len(servers) - 1:
+            right_s = servers[i + 1]
+            right_neighbor = f"{right_s.ip}:{right_s.port}"
+        else:
+            right_neighbor = "None"
+
         relevant_loot = {
             weapon_id: data
             for weapon_id, data in weapons_manager.state.map_weapons.items()
@@ -59,17 +70,10 @@ async def divide_map():
             if new_min <= data["x"] < new_max
         }
 
-        area_data = {
-            "t-l": [new_min, 0],
-            "b-r": [new_max, 0],
-            "loot": relevant_loot,
-            "potions": relevant_potions
-        }
-
         loot_str = serialize_items(relevant_loot)
         potions_str = serialize_items(relevant_potions)
-        print(loot_str, potions_str)
-        update_msg = f"UpdateStats|{new_min}|{new_max}|{loot_str}|{potions_str}\n"
+
+        update_msg = f"UpdateStats|{new_min}|{new_max}|{left_neighbor}|{right_neighbor}|{loot_str}|{potions_str}\n"
 
         try:
             s.writer.write(update_msg.encode())
