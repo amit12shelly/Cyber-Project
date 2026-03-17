@@ -134,13 +134,14 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             #
             selected_skill = Skill("Speed Boost", 5, 0, False)
             state.players_skills[client_id] = selected_skill
-            if len(parts) < 3:
+            if len(parts) < 4:
 
                 state.players_pos[client_id] = "0,0"
                 state.players_hp[client_id] = "100"
             else:
                 state.players_pos[client_id] = parts[1]
                 state.players_hp[client_id] = parts[2]
+                #state.players_control[client_id] = parts[3]
 
 
 
@@ -199,25 +200,46 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             if check_movement(new_pos, state.players_pos[client_id], state.players_skills[self._quic.host_cid.hex()]):
                 state.players_pos[client_id] = new_pos
                 self.broadcast_player(client_id, new_pos, state.players_hp[client_id], False)
-                new_x = new_pos.split(",")[0]
-                if state.neighbor['left'] is not None:
-                    if new_x < state.server_area_left:
-                        nei_ip = state.neighbor['left'].split(',')[0]
-                        nei_port = state.neighbor['left'].split(',')[1]
-                        msg = f"SWITCHED|{nei_ip}|{nei_port}\n".encode()
-                        self._quic.send_stream_data(self.stream_id, msg, end_stream=False)
-                        self.transmit()
-                        self.broadcast_remove(client_id)
-                        self.disconnect()
-                if state.neighbor['right'] is not None:
-                    if new_x > state.server_area_right:
-                        nei_ip = state.neighbor['right'].split(',')[0]
-                        nei_port = state.neighbor['right'].split(',')[1]
-                        msg = f"SWITCHED|{nei_ip}|{nei_port}\n".encode()
-                        self._quic.send_stream_data(self.stream_id, msg, end_stream=False)
-                        self.transmit()
-                        self.broadcast_remove(client_id)
-                        self.disconnect()
+                new_x = float(new_pos.split(",")[0])
+
+                if True: #state.players_control[client_id]:
+                    if state.neighbor['left'] is not None:
+                        if new_x < state.server_area_left: #if he is getting out ouf the server zone
+                            nei_ip = state.neighbor['left'].split(',')[0]
+                            nei_port = state.neighbor['left'].split(',')[1]
+
+                            if new_x + float(SCREEN_WIDTH) > state.server_area_left: #if he is between control zones
+
+                                msg = f"SWITCHED|{nei_ip}|{nei_port}|False\n".encode()
+                                self._quic.send_stream_data(self.stream_id, msg, end_stream=False)
+                                self.transmit()
+                            else:
+
+                                msg = f"SWITCHED|{nei_ip}|{nei_port}|True\n".encode()
+                                self._quic.send_stream_data(self.stream_id, msg, end_stream=False)
+                                self.transmit()
+                                self.disconnect()
+                                self.broadcast_remove(client_id)
+
+
+                    if state.neighbor['right'] is not None:
+                        if new_x > state.server_area_right:  #if he is getting out ouf the server zone
+                            nei_ip = state.neighbor['right'].split(',')[0]
+                            nei_port = state.neighbor['right'].split(',')[1]
+                            if new_x + float(SCREEN_WIDTH) < state.server_area_left:  # if he is between control zones
+
+                                msg = f"SWITCHED|{nei_ip}|{nei_port}|False\n".encode()
+                                self._quic.send_stream_data(self.stream_id, msg, end_stream=False)
+                                self.transmit()
+
+                            else:
+
+                                msg = f"SWITCHED|{nei_ip}|{nei_port}|True\n".encode()
+                                self._quic.send_stream_data(self.stream_id, msg, end_stream=False)
+                                self.transmit()
+                                self.disconnect()
+                                self.broadcast_remove(client_id)
+
             else:
                 self.disconnect()
                 print("player has been kicked! movement problem")
@@ -1237,7 +1259,7 @@ async def update_game_potions_from_lb(potions_string):
                 "type": p_type
             }
 
-            clients_msg = f"DROPPED|{x_val},{y_val}|{p_type}\n".encode("utf-8")
+            clients_msg = f"POTIONS|{x_val},{y_val}|{p_type}\n".encode("utf-8")
             for client in list(state.active_clients):
                 if client.stream_id is not None:
                     client._quic.send_stream_data(client.stream_id, clients_msg, end_stream=False)
@@ -1323,16 +1345,18 @@ async def connect_to_lb():
                         weapons = msg.split("|")[5]
 
                         await update_game_weapons_from_lb(weapons)
-                        await update_game_potions_from_lb(weapons)
+
 
 
                         potions = msg.split("|")[6]
+                        await update_game_potions_from_lb(potions)
                         potions = potions.split(";")
+
 
                         for old_potion in state.map_potion:
                             pos_str = f"{state.map_potion[old_potion]['x']},{state.map_potion[old_potion]['y']}"
                             type_str = state.map_potion[old_potion]["type"]
-                            msg = f"UDRROPPED|{pos_str}|{type_str}\n".encode("utf-8")
+                            msg = f"UNDROPPED|{pos_str}|{type_str}\n".encode("utf-8")
                             for client in list(state.active_clients):
                                 if client.stream_id is None:
                                     continue
@@ -1356,7 +1380,7 @@ async def connect_to_lb():
                                 "y": float(y_str),
                                 "type": p_type,
                             }
-                            msg = f"DROPPED|{x_str},{y_str}|{p_type}\n".encode("utf-8")
+                            msg = f"POTIONS|{x_str},{y_str}|{p_type}\n".encode("utf-8")
                             for client in list(state.active_clients):
                                 if client.stream_id is None:
                                     continue
