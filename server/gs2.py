@@ -215,8 +215,8 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 if state.players_control[client_id]:
                     if state.neighbor['left'] is not None:
                         if new_x < float(state.server_area_left): #if he is getting out ouf the server zone
-                            nei_ip = state.neighbor['left'].split(',')[0]
-                            nei_port = state.neighbor['left'].split(',')[1]
+                            nei_ip = state.neighbor['left'].split(':')[0]
+                            nei_port = state.neighbor['left'].split(':')[1]
 
                             if new_x + float(SCREEN_WIDTH) > float(state.server_area_left): #if he is between control zones
                                 # -------transfer client-------
@@ -247,8 +247,8 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
                     if state.neighbor['right'] is not None:
                         if new_x > float(state.server_area_right):  #if he is getting out ouf the server zone
-                            nei_ip = state.neighbor['right'].split(',')[0]
-                            nei_port = state.neighbor['right'].split(',')[1]
+                            nei_ip = state.neighbor['right'].split(':')[0]
+                            nei_port = state.neighbor['right'].split(':')[1]
                             if new_x + float(SCREEN_WIDTH) < float(state.server_area_left):  # if he is between control zones
 
                                 # -------transfer client-------
