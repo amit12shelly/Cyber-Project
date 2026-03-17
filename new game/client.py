@@ -7,6 +7,7 @@ import math
 from queue import Queue
 from aioquic.asyncio import connect
 from aioquic.quic.configuration import QuicConfiguration
+import client_test
 
 from server.server_game import SKILL_COOL_TIME
 
@@ -663,423 +664,431 @@ def draw_icons(screen, icons_lst, skill):
 # ---------------- MAIN GAME LOOP ---------------- #
 
 def main():
-    global MY_ID
-    global SKILL_COOL_TIME
-    SKILL_COOL_TIME = 12
-    pygame.init()
-    screen = pygame.display.set_mode((1280, 720))
-    pygame.display.set_caption("Game")
-    clock = pygame.time.Clock()
+    player_data = client_test.run_game_client()
 
-    tile_size = 64
-    floor_img = pygame.image.load("img/DesertTile.png").convert()
-    wall_img = pygame.image.load("img/watertile.png").convert()
-    bomb_img = pygame.image.load("img/bomb.png").convert_alpha()
-    bullet_img = pygame.image.load("img/bullet.png").convert_alpha()
-    bomb_icon = pygame.image.load("img/bomb_icon.png").convert_alpha()
-    speed_boost_icon = pygame.image.load("img/speed_boost_icon.png").convert_alpha()
-    shield_icon = pygame.image.load("img/shield_icon.png").convert_alpha()
+    if player_data != None:
+        gs_ip = player_data["gs_ip"]
+        gs_port = player_data["gs_port"]
 
-    inventory_open = False
-    ui_font = pygame.font.SysFont("arial", 22)
+        global MY_ID
+        MY_ID = player_data.get("id", "")
 
-    floor_img = pygame.transform.scale(floor_img, (tile_size, tile_size))
-    wall_img = pygame.transform.scale(wall_img, (tile_size, tile_size))
-    bullet_img = pygame.transform.scale(bullet_img, (21, 11))
-    bomb_img = pygame.transform.scale(bomb_img, (40, 40))
-    bomb_icon = pygame.transform.smoothscale(bomb_icon, (64, 70))
-    speed_boost_icon = pygame.transform.smoothscale(speed_boost_icon, (64, 70))
-    shield_icon = pygame.transform.smoothscale(shield_icon, (64, 70))
-    game_map = load_map("map.txt")
+        global SKILL_COOL_TIME
+        SKILL_COOL_TIME = 12
+        pygame.init()
+        screen = pygame.display.set_mode((1280, 720))
+        pygame.display.set_caption("Game")
+        clock = pygame.time.Clock()
 
-    skills_dict = {
-        "Speed Boost": Skill("Speed Boost", 10, 0, False),
-        "Shield": Skill("Shield", 6, 0, False),
-        "Bombs": Skill("Bombs", 7, 0, False)
-    }
-    skill = skills_dict["Shield"]
-    player = Player(128, 128, skill)
-    chat_font = pygame.font.SysFont("monospace", CHAT_FONT_SIZE)
-    chat_open = False
-    chat_input = ""
-    chat_messages = []
-    start_quic_thread()
+        tile_size = 64
+        floor_img = pygame.image.load("img/DesertTile.png").convert()
+        wall_img = pygame.image.load("img/watertile.png").convert()
+        bomb_img = pygame.image.load("img/bomb.png").convert_alpha()
+        bullet_img = pygame.image.load("img/bullet.png").convert_alpha()
+        bomb_icon = pygame.image.load("img/bomb_icon.png").convert_alpha()
+        speed_boost_icon = pygame.image.load("img/speed_boost_icon.png").convert_alpha()
+        shield_icon = pygame.image.load("img/shield_icon.png").convert_alpha()
 
+        inventory_open = False
+        ui_font = pygame.font.SysFont("arial", 22)
 
-    outgoing_messages.put(f"Connected|{player.x},{player.y}|{player.hp}")
-    outgoing_messages.put(f"UPDATE|{player.x},{player.y}")
+        floor_img = pygame.transform.scale(floor_img, (tile_size, tile_size))
+        wall_img = pygame.transform.scale(wall_img, (tile_size, tile_size))
+        bullet_img = pygame.transform.scale(bullet_img, (21, 11))
+        bomb_img = pygame.transform.scale(bomb_img, (40, 40))
+        bomb_icon = pygame.transform.smoothscale(bomb_icon, (64, 70))
+        speed_boost_icon = pygame.transform.smoothscale(speed_boost_icon, (64, 70))
+        shield_icon = pygame.transform.smoothscale(shield_icon, (64, 70))
+        game_map = load_map("map.txt")
 
-    weapon_images = {
-        "rifle": pygame.transform.scale(pygame.image.load("img/leftWeapon1.png").convert_alpha(), (64, 64)),
-        "gun":   pygame.transform.scale(pygame.image.load("img/rightWeapon1.png").convert_alpha(), (64, 64)),
-        "rpg":   pygame.transform.scale(pygame.image.load("img/rpg_right.png").convert_alpha(), (64, 64))
-    }
-    monster_img = pygame.transform.scale(pygame.image.load("img/monster_down.png").convert_alpha(), (45, 45))
-    potion_img  = pygame.transform.scale(pygame.image.load("img/hp_Potion.png").convert_alpha(), (40, 40))
-    poison_img  = pygame.transform.scale(pygame.image.load("img/poison_item.png").convert_alpha(), (40, 40))
-    remote_players = {}
-    active_skills = {}
-    # Loot pool (מאגר פריטים)
-
-    # loot_items = spawn_loot_per_camera_zone(game_map, tile_size, loot_pool, screen.get_width(), screen.get_height(),per_zone=1)
-    loot_items = []
-    poison_effects = []
-    monsters = []
-    inventory = []
-    hp_items = []
-    bullets = {}
-    server_fps = 0
+        skills_dict = {
+            "Speed Boost": Skill("Speed Boost", 10, 0, False),
+            "Shield": Skill("Shield", 6, 0, False),
+            "Bombs": Skill("Bombs", 7, 0, False)
+        }
+        skill = skills_dict["Shield"]
+        player = Player(128, 128, skill)
+        chat_font = pygame.font.SysFont("monospace", CHAT_FONT_SIZE)
+        chat_open = False
+        chat_input = ""
+        chat_messages = []
+        start_quic_thread()
 
 
-    running = True
-    while running:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                outgoing_messages.put("Disconnected")
-                running = False
+        outgoing_messages.put(f"Connected|{player.x},{player.y}|{player.hp}")
+        outgoing_messages.put(f"UPDATE|{player.x},{player.y}")
 
-            if event.type == pygame.KEYDOWN:
-                if chat_open:
-                    if event.key == pygame.K_RETURN:
-                        if chat_input.strip():
-                            outgoing_messages.put(f"CHAT|{chat_input.strip()}")
+        weapon_images = {
+            "rifle": pygame.transform.scale(pygame.image.load("img/leftWeapon1.png").convert_alpha(), (64, 64)),
+            "gun":   pygame.transform.scale(pygame.image.load("img/rightWeapon1.png").convert_alpha(), (64, 64)),
+            "rpg":   pygame.transform.scale(pygame.image.load("img/rpg_right.png").convert_alpha(), (64, 64))
+        }
+        monster_img = pygame.transform.scale(pygame.image.load("img/monster_down.png").convert_alpha(), (45, 45))
+        potion_img  = pygame.transform.scale(pygame.image.load("img/hp_Potion.png").convert_alpha(), (40, 40))
+        poison_img  = pygame.transform.scale(pygame.image.load("img/poison_item.png").convert_alpha(), (40, 40))
+        remote_players = {}
+        active_skills = {}
+        # Loot pool (מאגר פריטים)
+
+        # loot_items = spawn_loot_per_camera_zone(game_map, tile_size, loot_pool, screen.get_width(), screen.get_height(),per_zone=1)
+        loot_items = []
+        poison_effects = []
+        monsters = []
+        inventory = []
+        hp_items = []
+        bullets = {}
+        server_fps = 0
+
+
+        running = True
+        while running:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    outgoing_messages.put("Disconnected")
+                    running = False
+
+                if event.type == pygame.KEYDOWN:
+                    if chat_open:
+                        if event.key == pygame.K_RETURN:
+                            if chat_input.strip():
+                                outgoing_messages.put(f"CHAT|{chat_input.strip()}")
+                            chat_input = ""
+                            chat_open = False
+                        elif event.key == pygame.K_ESCAPE:
+                            chat_input = ""
+                            chat_open = False
+                        elif event.key == pygame.K_BACKSPACE:
+                            chat_input = chat_input[:-1]
+                        elif len(chat_input) < CHAT_INPUT_MAX_LEN and event.unicode.isprintable():
+                            chat_input += event.unicode
+                        continue
+
+                    if event.key == pygame.K_t:
+                        chat_open = True
                         chat_input = ""
-                        chat_open = False
-                    elif event.key == pygame.K_ESCAPE:
-                        chat_input = ""
-                        chat_open = False
-                    elif event.key == pygame.K_BACKSPACE:
-                        chat_input = chat_input[:-1]
-                    elif len(chat_input) < CHAT_INPUT_MAX_LEN and event.unicode.isprintable():
-                        chat_input += event.unicode
+
+                    if event.key == pygame.K_i:
+                        inventory_open = not inventory_open
+
+                    if event.key == pygame.K_n:
+                        player.auto_walk = not player.auto_walk
+                        print("Auto-walk:", player.auto_walk)
+
+                    if event.key == pygame.K_e and len(player.inventory) < 5:
+                        nearby_loot   = get_nearby_item(player, loot_items)
+                        nearby_potion = get_nearby_item(player, hp_items)
+                        if nearby_loot:
+                            # Set starting ammo from WEAPON_AMMO so counter shows immediately
+                            nearby_loot.ammo = WEAPON_AMMO.get(nearby_loot.name)
+                            player.pick_item(nearby_loot)
+                            loot_items.remove(nearby_loot)
+                            outgoing_messages.put(f"PICKUP|{nearby_loot.x},{nearby_loot.y}|{nearby_loot.name}")
+                        elif nearby_potion:
+                            hp_items.remove(nearby_potion)
+                            inventory.append(nearby_potion)
+                            outgoing_messages.put(f"PPICKUP|{nearby_potion.x},{nearby_potion.y}|{nearby_potion.name}")
+                            print(nearby_potion.name)
+                            print("Picked potion")
+
+                    if event.key == pygame.K_r:
+                        if len(inventory) > 0:
+                            item = inventory.pop(0)
+                            if item.name == "Potion":
+                                player.hp += UP_HP
+                                if player.hp > 100:
+                                    player.hp = 100
+                                outgoing_messages.put(f"USE|{item.name}")
+                            elif item.name == "Poison":
+                                outgoing_messages.put(f"USE|{item.name}|{player.x + 32},{player.y + 32}")
+
+                    if event.key == pygame.K_z or event.key == pygame.K_x or event.key == pygame.K_c:
+                        current_time = pygame.time.get_ticks() / 1000
+
+                        elapsed = current_time - skill.last_action_time - (skill.duration_time if skill.is_active else 0)
+
+                        if skill.is_active and elapsed < skill.duration_time:
+                            print(f"Skill is already active! Ends in {skill.duration_time - elapsed:.1f}s")
+
+                        total_wait_required = (skill.duration_time if skill.last_action_time != 0 else 0) + SKILL_COOL_TIME
+
+                        if elapsed >= total_wait_required:
+                            skill = skills_dict["Speed Boost"] if event.key == pygame.K_x else skills_dict["Shield"] if event.key == pygame.K_c else skills_dict["Bombs"]
+                            skill.last_action_time = current_time
+                            skill.is_active = True
+                            player.skill = skill
+                            print("Skill Active!")
+                            active_skills[MY_ID] = skill
+                            outgoing_messages.put(f"SKILL|{skill.name}|{current_time}")
+                        else:
+                            remaining = total_wait_required - elapsed
+                            print(f"Skill on cooldown. Wait {remaining:.1f}s")
+
+                    if event.key == pygame.K_q:
+                        slot_to_drop = player.selected_slot
+                        gun = player.drop_selected_weapon()
+                        if gun:
+                            dropped = Item(player.x, player.y, gun.image, "weapon", gun.name)
+                            loot_items.append(dropped)
+                            outgoing_messages.put(f"DROP|{player.x},{player.y}|{slot_to_drop}")
+                            print(f"Dropped {gun.name}")
+
+                    elif event.key == pygame.K_1:
+                        if len(player.inventory) >= 1:
+                            player.selected_slot = 0
+                    elif event.key == pygame.K_2:
+                        if len(player.inventory) >= 2:
+                            player.selected_slot = 1
+                    elif event.key == pygame.K_3:
+                        if len(player.inventory) >= 3:
+                            player.selected_slot = 2
+                    elif event.key == pygame.K_4:
+                        if len(player.inventory) >= 4:
+                            player.selected_slot = 3
+                    elif event.key == pygame.K_5:
+                        if len(player.inventory) >= 5:
+                            player.selected_slot = 4
+
+                elif event.type == pygame.MOUSEBUTTONDOWN:
+                    if event.button == 1:
+                        current_camera_x = player.x - screen.get_width() // 2
+                        current_camera_y = player.y - screen.get_height() // 2
+                        mouse_x, mouse_y = pygame.mouse.get_pos()
+                        world_mouse_x = mouse_x + current_camera_x
+                        world_mouse_y = mouse_y + current_camera_y
+                        player_center_x = player.x + (player.size // 2)
+                        player_center_y = player.y + (player.size // 2)
+                        dx = world_mouse_x - player_center_x
+                        dy = world_mouse_y - player_center_y
+                        angle_degrees = math.degrees(math.atan2(dy, dx))
+                        outgoing_messages.put(f"ATTACK|{player.selected_slot}|{angle_degrees}")
+
+            if not chat_open:
+                keys = pygame.key.get_pressed()
+                player.move(keys, game_map, tile_size, skill)
+
+            while not incoming_messages.empty():
+                msg = incoming_messages.get()
+                print(msg)
+                parts = msg.split("|")
+                if not parts:
                     continue
 
-                if event.key == pygame.K_t:
-                    chat_open = True
-                    chat_input = ""
-
-                if event.key == pygame.K_i:
-                    inventory_open = not inventory_open
-
-                if event.key == pygame.K_n:
-                    player.auto_walk = not player.auto_walk
-                    print("Auto-walk:", player.auto_walk)
-
-                if event.key == pygame.K_e and len(player.inventory) < 5:
-                    nearby_loot   = get_nearby_item(player, loot_items)
-                    nearby_potion = get_nearby_item(player, hp_items)
-                    if nearby_loot:
-                        # Set starting ammo from WEAPON_AMMO so counter shows immediately
-                        nearby_loot.ammo = WEAPON_AMMO.get(nearby_loot.name)
-                        player.pick_item(nearby_loot)
-                        loot_items.remove(nearby_loot)
-                        outgoing_messages.put(f"PICKUP|{nearby_loot.x},{nearby_loot.y}|{nearby_loot.name}")
-                    elif nearby_potion:
-                        hp_items.remove(nearby_potion)
-                        inventory.append(nearby_potion)
-                        outgoing_messages.put(f"PPICKUP|{nearby_potion.x},{nearby_potion.y}|{nearby_potion.name}")
-                        print(nearby_potion.name)
-                        print("Picked potion")
-
-                if event.key == pygame.K_r:
-                    if len(inventory) > 0:
-                        item = inventory.pop(0)
-                        if item.name == "Potion":
-                            player.hp += UP_HP
-                            if player.hp > 100:
-                                player.hp = 100
-                            outgoing_messages.put(f"USE|{item.name}")
-                        elif item.name == "Poison":
-                            outgoing_messages.put(f"USE|{item.name}|{player.x + 32},{player.y + 32}")
-
-                if event.key == pygame.K_z or event.key == pygame.K_x or event.key == pygame.K_c:
-                    current_time = pygame.time.get_ticks() / 1000
-
-                    elapsed = current_time - skill.last_action_time - (skill.duration_time if skill.is_active else 0)
-
-                    if skill.is_active and elapsed < skill.duration_time:
-                        print(f"Skill is already active! Ends in {skill.duration_time - elapsed:.1f}s")
-
-                    total_wait_required = (skill.duration_time if skill.last_action_time != 0 else 0) + SKILL_COOL_TIME
-
-                    if elapsed >= total_wait_required:
-                        skill = skills_dict["Speed Boost"] if event.key == pygame.K_x else skills_dict["Shield"] if event.key == pygame.K_c else skills_dict["Bombs"]
-                        skill.last_action_time = current_time
-                        skill.is_active = True
-                        player.skill = skill
-                        print("Skill Active!")
-                        active_skills[MY_ID] = skill
-                        outgoing_messages.put(f"SKILL|{skill.name}|{current_time}")
-                    else:
-                        remaining = total_wait_required - elapsed
-                        print(f"Skill on cooldown. Wait {remaining:.1f}s")
-
-                if event.key == pygame.K_q:
-                    slot_to_drop = player.selected_slot
-                    gun = player.drop_selected_weapon()
-                    if gun:
-                        dropped = Item(player.x, player.y, gun.image, "weapon", gun.name)
-                        loot_items.append(dropped)
-                        outgoing_messages.put(f"DROP|{player.x},{player.y}|{slot_to_drop}")
-                        print(f"Dropped {gun.name}")
-
-                elif event.key == pygame.K_1:
-                    if len(player.inventory) >= 1:
-                        player.selected_slot = 0
-                elif event.key == pygame.K_2:
-                    if len(player.inventory) >= 2:
-                        player.selected_slot = 1
-                elif event.key == pygame.K_3:
-                    if len(player.inventory) >= 3:
-                        player.selected_slot = 2
-                elif event.key == pygame.K_4:
-                    if len(player.inventory) >= 4:
-                        player.selected_slot = 3
-                elif event.key == pygame.K_5:
-                    if len(player.inventory) >= 5:
-                        player.selected_slot = 4
-
-            elif event.type == pygame.MOUSEBUTTONDOWN:
-                if event.button == 1:
-                    current_camera_x = player.x - screen.get_width() // 2
-                    current_camera_y = player.y - screen.get_height() // 2
-                    mouse_x, mouse_y = pygame.mouse.get_pos()
-                    world_mouse_x = mouse_x + current_camera_x
-                    world_mouse_y = mouse_y + current_camera_y
-                    player_center_x = player.x + (player.size // 2)
-                    player_center_y = player.y + (player.size // 2)
-                    dx = world_mouse_x - player_center_x
-                    dy = world_mouse_y - player_center_y
-                    angle_degrees = math.degrees(math.atan2(dy, dx))
-                    outgoing_messages.put(f"ATTACK|{player.selected_slot}|{angle_degrees}")
-
-        if not chat_open:
-            keys = pygame.key.get_pressed()
-            player.move(keys, game_map, tile_size, skill)
-
-        while not incoming_messages.empty():
-            msg = incoming_messages.get()
-            print(msg)
-            parts = msg.split("|")
-            if not parts:
-                continue
-
-            if parts[0] == "UPDATE":
-                if len(parts) < 4:
-                    continue
-                player_id = parts[1]
-                x, y = map(float, parts[2].split(","))
-                hp = int(parts[3])
-                if player_id == MY_ID:
-                    player.hp = hp
-                else:
-                    if player_id not in remote_players:
-                        remote_players[player_id] = RemotePlayer(x, y, hp, player.base_sprites, player_id)
-                        outgoing_messages.put(f"UPDATE|{player.x},{player.y}")
-                    else:
-                        remote_players[player_id].update_from_server(x, y, hp)
-
-            elif parts[0] == "REMOVE":
-                if len(parts) < 2:
-                    continue
-                player_id = parts[1]
-                if player_id in remote_players:
-                    del remote_players[player_id]
+                if parts[0] == "UPDATE":
+                    if len(parts) < 4:
+                        continue
+                    player_id = parts[1]
+                    x, y = map(float, parts[2].split(","))
+                    hp = int(parts[3])
                     if player_id == MY_ID:
-                        pygame.quit(); exit()
-                else:
-                    if player_id == MY_ID:
-                        pygame.quit(); exit()
+                        player.hp = hp
+                    else:
+                        if player_id not in remote_players:
+                            remote_players[player_id] = RemotePlayer(x, y, hp, player.base_sprites, player_id)
+                            outgoing_messages.put(f"UPDATE|{player.x},{player.y}")
+                        else:
+                            remote_players[player_id].update_from_server(x, y, hp)
 
-            elif parts[0] == "SHOW-BULLET":
-                if len(parts) < 5:
-                    continue
-                bullet_x = parts[1].split(',')[0]
-                bullet_y = parts[1].split(',')[1]
-                bullets[parts[3]] = {"x": bullet_x, "y": bullet_y, "angle": parts[2], "type": parts[4]}
+                elif parts[0] == "REMOVE":
+                    if len(parts) < 2:
+                        continue
+                    player_id = parts[1]
+                    if player_id in remote_players:
+                        del remote_players[player_id]
+                        if player_id == MY_ID:
+                            pygame.quit(); exit()
+                    else:
+                        if player_id == MY_ID:
+                            pygame.quit(); exit()
 
-            elif parts[0] == "DEL-BULLET":
-                if len(parts) < 2:
-                    continue
-                try:
-                    del bullets[parts[1]]
-                except:
-                    pass
+                elif parts[0] == "SHOW-BULLET":
+                    if len(parts) < 5:
+                        continue
+                    bullet_x = parts[1].split(',')[0]
+                    bullet_y = parts[1].split(',')[1]
+                    bullets[parts[3]] = {"x": bullet_x, "y": bullet_y, "angle": parts[2], "type": parts[4]}
 
-            elif parts[0] == "DROPPED":
-                if len(parts) < 3:
-                    continue
-                x_dropped, y_dropped = parts[1].split(",")
-                x_dropped = float(x_dropped)
-                y_dropped = float(y_dropped)
-                type_dropped = parts[2]
-                if type_dropped in weapon_images:
-                    img = weapon_images[type_dropped]
-                    loot_items.append(Item(x_dropped, y_dropped, img, "weapon", type_dropped))
-                else:
-                    print(f"Warning: Unknown weapon type dropped: {type_dropped}")
+                elif parts[0] == "DEL-BULLET":
+                    if len(parts) < 2:
+                        continue
+                    try:
+                        del bullets[parts[1]]
+                    except:
+                        pass
 
-            elif parts[0] == "UNDROPPED":
-                if len(parts) < 3:
-                    continue
-                x_pick, y_pick = parts[1].split(",")
-                x_pick = float(x_pick)
-                y_pick = float(y_pick)
-                type_pick = parts[2]
-                if type_pick in ("Potion", "Poison"):
-                    for potion in hp_items:
-                        if potion.x == x_pick and potion.y == y_pick and potion.name == type_pick:
-                            hp_items.remove(potion)
-                            break
-                else:
-                    for item in loot_items:
-                        if item.x == x_pick and item.y == y_pick and item.name == type_pick:
-                            loot_items.remove(item)
-                            break
+                elif parts[0] == "DROPPED":
+                    if len(parts) < 3:
+                        continue
+                    x_dropped, y_dropped = parts[1].split(",")
+                    x_dropped = float(x_dropped)
+                    y_dropped = float(y_dropped)
+                    type_dropped = parts[2]
+                    if type_dropped in weapon_images:
+                        img = weapon_images[type_dropped]
+                        loot_items.append(Item(x_dropped, y_dropped, img, "weapon", type_dropped))
+                    else:
+                        print(f"Warning: Unknown weapon type dropped: {type_dropped}")
 
-            elif parts[0] == "AMMO":
-                # Server sends current ammo after every shot so the display stays live
-                if len(parts) < 3:
-                    continue
-                try:
-                    slot = int(parts[1])
-                    ammo  = int(parts[2])
-                    if 0 <= slot < len(player.inventory):
-                        player.inventory[slot].ammo = ammo
-                except:
-                    pass
+                elif parts[0] == "UNDROPPED":
+                    if len(parts) < 3:
+                        continue
+                    x_pick, y_pick = parts[1].split(",")
+                    x_pick = float(x_pick)
+                    y_pick = float(y_pick)
+                    type_pick = parts[2]
+                    if type_pick in ("Potion", "Poison"):
+                        for potion in hp_items:
+                            if potion.x == x_pick and potion.y == y_pick and potion.name == type_pick:
+                                hp_items.remove(potion)
+                                break
+                    else:
+                        for item in loot_items:
+                            if item.x == x_pick and item.y == y_pick and item.name == type_pick:
+                                loot_items.remove(item)
+                                break
 
-            elif parts[0] == "REMOVE_WEAPON":
-                # Server tells us a weapon slot ran out of ammo and was removed
-                if len(parts) < 2:
-                    continue
-                try:
-                    slot = int(parts[1])
-                    if 0 <= slot < len(player.inventory):
-                        player.inventory.pop(slot)
-                        if player.selected_slot >= len(player.inventory):
-                            player.selected_slot = max(len(player.inventory) - 1, 0)
-                except:
-                    pass
+                elif parts[0] == "AMMO":
+                    # Server sends current ammo after every shot so the display stays live
+                    if len(parts) < 3:
+                        continue
+                    try:
+                        slot = int(parts[1])
+                        ammo  = int(parts[2])
+                        if 0 <= slot < len(player.inventory):
+                            player.inventory[slot].ammo = ammo
+                    except:
+                        pass
 
-            elif parts[0] == "CHAT":
-                if len(parts) < 3:
-                    continue
-                sender_id = parts[1]
-                short_id = sender_id[-6:] if len(sender_id) >= 6 else sender_id
-                display_name = "You" if sender_id == MY_ID else short_id
-                chat_messages.append((f"<{display_name}> {parts[2]}", time.time()))
+                elif parts[0] == "REMOVE_WEAPON":
+                    # Server tells us a weapon slot ran out of ammo and was removed
+                    if len(parts) < 2:
+                        continue
+                    try:
+                        slot = int(parts[1])
+                        if 0 <= slot < len(player.inventory):
+                            player.inventory.pop(slot)
+                            if player.selected_slot >= len(player.inventory):
+                                player.selected_slot = max(len(player.inventory) - 1, 0)
+                    except:
+                        pass
 
-            elif parts[0] == "SETID":
-                if MY_ID == "":
-                    MY_ID = parts[1]
+                elif parts[0] == "CHAT":
+                    if len(parts) < 3:
+                        continue
+                    sender_id = parts[1]
+                    short_id = sender_id[-6:] if len(sender_id) >= 6 else sender_id
+                    display_name = "You" if sender_id == MY_ID else short_id
+                    chat_messages.append((f"<{display_name}> {parts[2]}", time.time()))
 
-            elif parts[0] == "FPS":
-                server_fps = parts[1]
+                elif parts[0] == "SETID":
+                    if MY_ID == "":
+                        MY_ID = parts[1]
 
-            elif parts[0] == "MONSTERS":
-                monsters.clear()
-                for monster_data in parts[1:]:
-                    x_monster, y_monster, hp_monster = monster_data.split(",")
-                    x_monster  = float(x_monster)
-                    y_monster  = float(y_monster)
-                    hp_monster = int(hp_monster)
-                    if hp_monster > 0:
-                        monsters.append(Monster(x_monster, y_monster, hp_monster, monster_img))
+                elif parts[0] == "FPS":
+                    server_fps = parts[1]
 
-            elif parts[0] == "POTIONS":
-                x_potion, y_potion = parts[1].split(",")
-                x_potion = float(x_potion)
-                y_potion = float(y_potion)
-                if parts[2] == "Potion":
-                    hp_items.append(Potion(x_potion, y_potion, potion_img, "Potion"))
-                elif parts[2] == "Poison":
-                    hp_items.append(Potion(x_potion, y_potion, poison_img, "Poison"))
+                elif parts[0] == "MONSTERS":
+                    monsters.clear()
+                    for monster_data in parts[1:]:
+                        x_monster, y_monster, hp_monster = monster_data.split(",")
+                        x_monster  = float(x_monster)
+                        y_monster  = float(y_monster)
+                        hp_monster = int(hp_monster)
+                        if hp_monster > 0:
+                            monsters.append(Monster(x_monster, y_monster, hp_monster, monster_img))
 
-                    hp_items.append(Potion(x_potion,y_potion,potion_img))
-            elif parts[0] == "SKILL":
-                player_id = parts[1]
-                player_skill = parts[2]
-                is_active = parts[3]
-                if is_active == "True":
-                    active_skills[player_id] = skills_dict[player_skill]
-                else:
-                    del active_skills[player_id]
-                print(active_skills)
-            elif parts[0] == "POISON":
-                pos = parts[1]
-                x, y = map(float, pos.split(","))
-                poison_effects.append(PoisonEffect(x, y))
+                elif parts[0] == "POTIONS":
+                    x_potion, y_potion = parts[1].split(",")
+                    x_potion = float(x_potion)
+                    y_potion = float(y_potion)
+                    if parts[2] == "Potion":
+                        hp_items.append(Potion(x_potion, y_potion, potion_img, "Potion"))
+                    elif parts[2] == "Poison":
+                        hp_items.append(Potion(x_potion, y_potion, poison_img, "Poison"))
 
-            elif parts[0] == "ITEMS":
-                if len(parts) < 3:
-                    continue
-                x_item, y_item = parts[1].split(",")
-                x_item = float(x_item)
-                y_item = float(y_item)
-                if parts[2] == "Potion":
-                    hp_items.append(Potion(x_item, y_item, potion_img, "Potion"))
-                elif parts[2] == "Poison":
-                    hp_items.append(Potion(x_item, y_item, poison_img, "Poison"))
+                        hp_items.append(Potion(x_potion,y_potion,potion_img))
+                elif parts[0] == "SKILL":
+                    player_id = parts[1]
+                    player_skill = parts[2]
+                    is_active = parts[3]
+                    if is_active == "True":
+                        active_skills[player_id] = skills_dict[player_skill]
+                    else:
+                        del active_skills[player_id]
+                    print(active_skills)
+                elif parts[0] == "POISON":
+                    pos = parts[1]
+                    x, y = map(float, pos.split(","))
+                    poison_effects.append(PoisonEffect(x, y))
 
-        # --- CAMERA ---
-        camera_x = player.x - screen.get_width() // 2
-        camera_y = player.y - screen.get_height() // 2
+                elif parts[0] == "ITEMS":
+                    if len(parts) < 3:
+                        continue
+                    x_item, y_item = parts[1].split(",")
+                    x_item = float(x_item)
+                    y_item = float(y_item)
+                    if parts[2] == "Potion":
+                        hp_items.append(Potion(x_item, y_item, potion_img, "Potion"))
+                    elif parts[2] == "Poison":
+                        hp_items.append(Potion(x_item, y_item, poison_img, "Poison"))
 
-        screen.fill((30, 30, 30))
-        draw_map(screen, game_map, tile_size, camera_x, camera_y, floor_img, wall_img)
+            # --- CAMERA ---
+            camera_x = player.x - screen.get_width() // 2
+            camera_y = player.y - screen.get_height() // 2
 
-        for item in loot_items:
-            item.update()
-            item.draw(screen, camera_x, camera_y)
+            screen.fill((30, 30, 30))
+            draw_map(screen, game_map, tile_size, camera_x, camera_y, floor_img, wall_img)
 
-        player.draw(screen, camera_x, camera_y, active_skills)
-        for rp in remote_players.values():
-            rp.draw(screen, camera_x, camera_y, active_skills)
-        for monster in monsters:
-            if (camera_x - 100 <= monster.x <= camera_x + screen.get_width() + 100 and
-                    camera_y - 100 <= monster.y <= camera_y + screen.get_height() + 100):
-                monster.update()
-                monster.draw(screen, camera_x, camera_y)
+            for item in loot_items:
+                item.update()
+                item.draw(screen, camera_x, camera_y)
 
-        for hp_item in hp_items:
-            hp_item.draw(screen, camera_x, camera_y)
+            player.draw(screen, camera_x, camera_y, active_skills)
+            for rp in remote_players.values():
+                rp.draw(screen, camera_x, camera_y, active_skills)
+            for monster in monsters:
+                if (camera_x - 100 <= monster.x <= camera_x + screen.get_width() + 100 and
+                        camera_y - 100 <= monster.y <= camera_y + screen.get_height() + 100):
+                    monster.update()
+                    monster.draw(screen, camera_x, camera_y)
 
-        for effect in poison_effects:
-            effect.update()
-            effect.draw(screen, camera_x, camera_y)
-        poison_effects = [e for e in poison_effects if len(e.particles) > 0]
+            for hp_item in hp_items:
+                hp_item.draw(screen, camera_x, camera_y)
 
-        for i in bullets:
-            bullet_x     = float(bullets[i]["x"])
-            bullet_y     = float(bullets[i]["y"])
-            bullet_angle = float(bullets[i]["angle"])
-            bullet_type = str(bullets[i]["type"])
-            draw_bullet(screen, bullet_img if bullet_type == "bullet" else bomb_img, bullet_x, bullet_y, bullet_angle, camera_x, camera_y)
-            new_x, new_y = get_next_bullet_position(bullet_x, bullet_y, bullet_angle)
-            bullets[i]["x"] = new_x
-            bullets[i]["y"] = new_y
+            for effect in poison_effects:
+                effect.update()
+                effect.draw(screen, camera_x, camera_y)
+            poison_effects = [e for e in poison_effects if len(e.particles) > 0]
 
-            #if on player/outside the map/on water:
-            #del bullets[i]
+            for i in bullets:
+                bullet_x     = float(bullets[i]["x"])
+                bullet_y     = float(bullets[i]["y"])
+                bullet_angle = float(bullets[i]["angle"])
+                bullet_type = str(bullets[i]["type"])
+                draw_bullet(screen, bullet_img if bullet_type == "bullet" else bomb_img, bullet_x, bullet_y, bullet_angle, camera_x, camera_y)
+                new_x, new_y = get_next_bullet_position(bullet_x, bullet_y, bullet_angle)
+                bullets[i]["x"] = new_x
+                bullets[i]["y"] = new_y
 
-        current_time = pygame.time.get_ticks() / 1000
-        if skill.is_active:
-            if current_time - skill.last_action_time >= skill.duration_time:
-                skill.is_active = False
-                player.skill = skill
-                del active_skills[MY_ID]
-                print("Skill duration finished! (Speed boost ended)")
-        draw_fps(screen, clock, chat_font, server_fps)
-        draw_inventory(screen, player, chat_font)
-        draw_chat(screen, chat_font, chat_messages, chat_open, chat_input)
-        draw_icons(screen, [shield_icon, speed_boost_icon, bomb_icon], skill)
-        draw_potion_slot(screen, inventory)
-        if inventory_open:
-            draw_big_inventory(screen, player, inventory, ui_font)
+                #if on player/outside the map/on water:
+                #del bullets[i]
 
-        pygame.display.flip()
-        clock.tick(60)
+            current_time = pygame.time.get_ticks() / 1000
+            if skill.is_active:
+                if current_time - skill.last_action_time >= skill.duration_time:
+                    skill.is_active = False
+                    player.skill = skill
+                    del active_skills[MY_ID]
+                    print("Skill duration finished! (Speed boost ended)")
+            draw_fps(screen, clock, chat_font, server_fps)
+            draw_inventory(screen, player, chat_font)
+            draw_chat(screen, chat_font, chat_messages, chat_open, chat_input)
+            draw_icons(screen, [shield_icon, speed_boost_icon, bomb_icon], skill)
+            draw_potion_slot(screen, inventory)
+            if inventory_open:
+                draw_big_inventory(screen, player, inventory, ui_font)
+
+            pygame.display.flip()
+            clock.tick(60)
 
     pygame.quit()
 
