@@ -1,6 +1,9 @@
 import sqlite3
 import hashlib
 import time
+import random
+import os
+import secrets
 from typing import Optional, Dict, Any
 
 # =========================
@@ -9,7 +12,8 @@ from typing import Optional, Dict, Any
 
 # SQLite database file name
 DB_NAME = "game.db"
-
+MAP_FILENAME = "map.txt"
+TILE_SIZE = 64
 
 # ==================================================
 # hash_password
@@ -41,6 +45,35 @@ def get_conn():
 
 
 # ==================================================
+# get_random_valid_position
+# --------------------------------------------------
+# סורקת את קובץ המפה ומחזירה קואורדינטות (x, y)
+# של אריח שאינו קיר (#).
+# ==================================================
+def get_random_valid_position() -> tuple[int, int]:
+    valid_tiles = []
+
+    if os.path.exists(MAP_FILENAME):
+        try:
+            with open(MAP_FILENAME, "r") as f:
+                game_map = [line.strip() for line in f.readlines()]
+
+            for row_idx, row in enumerate(game_map):
+                for col_idx, tile in enumerate(row):
+                    if tile != "#":
+                        valid_tiles.append((col_idx, row_idx))
+        except Exception as e:
+            print(f"Error reading map file: {e}")
+
+    if valid_tiles:
+        tile_x, tile_y = random.choice(valid_tiles)
+        # מחזיר את המיקום בפיקסלים (עולם המשחק)
+        return tile_x * TILE_SIZE, tile_y * TILE_SIZE
+
+    # ברירת מחדל אם המפה לא נמצאה או לא תקינה
+    return TILE_SIZE, TILE_SIZE
+
+# ==================================================
 # init_db
 # --------------------------------------------------
 # Initializes the database schema.
@@ -59,12 +92,9 @@ def init_db():
     # Stores login credentials and persistent player data
     cur.execute("""
     CREATE TABLE IF NOT EXISTS players (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id INTEGER PRIMARY KEY,
         username TEXT UNIQUE NOT NULL,
         password_hash TEXT NOT NULL,
-        level INTEGER DEFAULT 1,
-        exp INTEGER DEFAULT 0,
-        gold INTEGER DEFAULT 0,
         created_at INTEGER
     )
     """)
@@ -73,17 +103,16 @@ def init_db():
     # Stores the in-game character state for each player
     # One character per player (player_id is UNIQUE)
     cur.execute("""
-    CREATE TABLE IF NOT EXISTS characters (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        player_id INTEGER UNIQUE,
-        x INTEGER DEFAULT 0,
-        y INTEGER DEFAULT 0,
-        hp INTEGER DEFAULT 100,
-        mp INTEGER DEFAULT 50,
-        last_save INTEGER,
-        FOREIGN KEY(player_id) REFERENCES players(id)
-    )
-    """)
+        CREATE TABLE IF NOT EXISTS characters (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            player_id INTEGER UNIQUE,
+            x INTEGER DEFAULT 0,
+            y INTEGER DEFAULT 0,
+            hp INTEGER DEFAULT 100,
+            last_save INTEGER,
+            FOREIGN KEY(player_id) REFERENCES players(id)
+        )
+        """)
 
     # ---------------- Inventory Table ----------------
     # Stores all items owned by a player
@@ -91,8 +120,7 @@ def init_db():
     CREATE TABLE IF NOT EXISTS inventory (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         player_id INTEGER NOT NULL,
-        slot INTEGER NOT NULL CHECK(slot >= 0 AND slot < 10),
-        item_name TEXT,
+        slot INTEGER NOT NULL CHECK(slot >= 0 AND slot < 5),
         amount INTEGER DEFAULT 0,
         FOREIGN KEY(player_id) REFERENCES players(id),
         UNIQUE(player_id, slot)
@@ -122,21 +150,21 @@ def init_db():
 # ==================================================
 def register(username: str, password: str) -> bool:
     try:
-        conn = get_conn()
+        start_x, start_y = get_random_valid_position()
+
+        secure_id = secrets.randbits(31)
+
+        conn = sqlite3.connect(DB_NAME)
         cur = conn.cursor()
 
-        # Insert new player
         cur.execute(
-            "INSERT INTO players (username, password_hash, created_at) VALUES (?, ?, ?)",
-            (username, hash_password(password), int(time.time()))
+            "INSERT INTO players (id, username, password_hash, created_at) VALUES (?, ?, ?, ?)",
+            (secure_id, username, hash_password(password), int(time.time()))
         )
 
-        player_id = cur.lastrowid
-
-        # Create default character for the player
         cur.execute(
-            "INSERT INTO characters (player_id, last_save) VALUES (?, ?)",
-            (player_id, int(time.time()))
+            "INSERT INTO characters (player_id, x, y, hp, last_save) VALUES (?, ?, ?, ?, ?)",
+            (secure_id, start_x, start_y, 100, int(time.time()))
         )
 
         conn.commit()
@@ -144,7 +172,10 @@ def register(username: str, password: str) -> bool:
         return True
 
     except sqlite3.IntegrityError:
-        # Triggered when username already exists
+        # שם משתמש כבר קיים
+        return False
+    except Exception as e:
+        print(f"Registration error: {e}")
         return False
 
 
@@ -195,40 +226,27 @@ def load_player(player_id: int) -> Dict[str, Any]:
     conn = get_conn()
     cur = conn.cursor()
 
-    # Load basic player data
-    cur.execute(
-        "SELECT username, level, exp, gold FROM players WHERE id=?",
-        (player_id,)
-    )
+    cur.execute("SELECT username FROM players WHERE id=?", (player_id,))
     p = cur.fetchone()
 
-    # Load character state
-    cur.execute(
-        "SELECT x, y, hp, mp FROM characters WHERE player_id=?",
-        (player_id,)
-    )
+    cur.execute("SELECT x, y, hp FROM characters WHERE player_id=?", (player_id,))
     c = cur.fetchone()
 
-    # Load inventory
-    cur.execute(
-        "SELECT item_name, amount FROM inventory WHERE player_id=?",
-        (player_id,)
-    )
-    inv = cur.fetchall()
+    cur.execute("SELECT slot, amount FROM inventory WHERE player_id=?", (player_id,))
+    inv_rows = cur.fetchall()
 
     conn.close()
+
+    if not p or not c:
+        return {}
 
     return {
         "player_id": player_id,
         "username": p[0],
-        "level": p[1],
-        "exp": p[2],
-        "gold": p[3],
         "x": c[0],
         "y": c[1],
         "hp": c[2],
-        "mp": c[3],
-        "inventory": {name: amount for name, amount in inv}
+        "inventory": {row[0]: row[1] for row in inv_rows}
     }
 
 
@@ -247,28 +265,18 @@ def save_player(state: Dict[str, Any]):
     conn = get_conn()
     cur = conn.cursor()
 
-    # Update player stats
+    # עדכון נתוני דמות
     cur.execute(
-        "UPDATE players SET level=?, exp=?, gold=? WHERE id=?",
-        (state["level"], state["exp"], state["gold"], state["player_id"])
+        "UPDATE characters SET x=?, y=?, hp=?, last_save=? WHERE player_id=?",
+        (state["x"], state["y"], state["hp"], int(time.time()), state["player_id"])
     )
 
-    # Update character state
-    cur.execute(
-        "UPDATE characters SET x=?, y=?, hp=?, mp=?, last_save=? WHERE player_id=?",
-        (state["x"], state["y"], state["hp"], state["mp"], int(time.time()), state["player_id"])
-    )
-
-    # Replace inventory (simple but safe approach)
-    cur.execute(
-        "DELETE FROM inventory WHERE player_id=?",
-        (state["player_id"],)
-    )
-
-    for item, amount in state["inventory"].items():
+    # עדכון אינוונטורי (מחיקה וכתיבה מחדש)
+    cur.execute("DELETE FROM inventory WHERE player_id=?", (state["player_id"],))
+    for slot, amount in state["inventory"].items():
         cur.execute(
-            "INSERT INTO inventory (player_id, item_name, amount) VALUES (?, ?, ?)",
-            (state["player_id"], item, amount)
+            "INSERT INTO inventory (player_id, slot, amount) VALUES (?, ?, ?)",
+            (state["player_id"], slot, amount)
         )
 
     conn.commit()

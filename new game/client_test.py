@@ -5,7 +5,7 @@ import ssl
 import time
 
 
-def run_game_client():
+def login_client():
     pygame.init()
     width, height = 800, 600
     screen = pygame.display.set_mode((width, height))
@@ -26,12 +26,14 @@ def run_game_client():
     status_msg = "Enter Server IP & Port"
     state = "SERVER_INFO"
     running = True
+    player_data = None
+    login_done = False
 
     def start_network_thread(request_type):
-        nonlocal status_msg, state, active_field
+        nonlocal status_msg, state, active_field, player_data, login_done
 
         async def network_logic():
-            nonlocal status_msg, state, active_field
+            nonlocal status_msg, state, active_field, player_data, login_done
             try:
                 context = ssl.create_default_context()
                 context.check_hostname = False
@@ -44,29 +46,54 @@ def run_game_client():
                 if request_type == "CHECK_CONNECTION":
                     writer.write(b"CHECK_CONNECTION")
                     await writer.drain()
-                    data = await reader.read(100)
+                    data = await reader.read(1024)
                     if data.decode().strip() == "OK":
                         status_msg = "Connected! Choose an option."
                         state = "CHOICE_MENU"
                     writer.close()
+
                 else:
                     message = f"{request_type}:{inputs['user']}:{inputs['pass']}"
                     writer.write(message.encode())
                     await writer.drain()
 
-                    raw_data = await reader.read(100)
+                    # קריאת התשובה המפורטת מהשרת
+                    raw_data = await reader.read(1024)
                     reply = raw_data.decode().strip()
-                    status_msg = f"Server: {reply}"
 
-                    if "Success" in reply:
+                    # בדיקה אם ההתחברות הצליחה
+                    if reply.startswith("LOGIN_SUCCESS"):
+                        parts = reply.split("|")
+                        player_data = {
+                            "id": parts[1],
+                            "username": parts[2],
+                            "x": int(parts[3]),
+                            "y": int(parts[4]),
+                            "hp": int(parts[5]),
+                            "inventory": parts[6],
+                            "gs_ip": parts[7],
+                            "gs_port": int(parts[8])
+                        }
+                        login_done = True
+
+                        status_msg = f"Welcome {player_data['username']}!"
+                        print(f"Loaded Player Data: {player_data}")
+
+                        # כאן תוכל לשנות את ה-state ל-"IN_GAME" בעתיד
+                        # state = "IN_GAME"
                         time.sleep(1.0)
+                        auth_finished = True
+
+                    elif reply == "Registration Success":
+                        status_msg = "Account Created! Please Login."
                         state = "CHOICE_MENU"
-                        inputs["pass"], inputs["confirm_pass"] = "", ""
+                    else:
+                        status_msg = f"Server: {reply}"
 
                     writer.close()
                 await writer.wait_closed()
-            except Exception:
-                status_msg = "Error: Connection Failed!"
+            except Exception as e:
+                status_msg = f"Error: {e}"
                 state = "SERVER_INFO"
 
         thread = threading.Thread(target=lambda: asyncio.run(network_logic()))
@@ -74,9 +101,14 @@ def run_game_client():
         thread.start()
 
     while running:
+        if login_done:
+            running = False  # שובר את הלופ של ה-UI וממשיך לסוף הפונקציה
+            continue
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
+                player_data = None
 
             if event.type == pygame.KEYDOWN:
                 # --- מקש ESC לניווט אחורה ---
@@ -179,7 +211,8 @@ def run_game_client():
         pygame.display.flip()
         clock.tick(30)
     pygame.quit()
+    return player_data
 
 
 if __name__ == "__main__":
-    run_game_client()
+    login_client()
