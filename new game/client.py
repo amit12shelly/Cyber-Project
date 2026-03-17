@@ -407,7 +407,7 @@ class Player:
         else:
             self.anim_frame = 0
             self.anim_timer = 0
-        self.skill = skill
+        # self.skill = skill
     def pick_item(self, item):
         self.inventory.append(item)
         print(f"Picked up {item.name}")
@@ -530,7 +530,8 @@ class RemotePlayer:
             self.direction = "down" if dy > 0 else "up"
 
     def draw(self, screen, camera_x, camera_y, active_skills):
-        screen.blit(self.sprites[self.direction][0], (self.x - camera_x, self.y - camera_y))try:
+        screen.blit(self.sprites[self.direction][0], (self.x - camera_x, self.y - camera_y))
+        try:
             if active_skills[self.id].name == "Shield":
                 shield_center = (self.x - camera_x + 32, self.y - camera_y + 32)  # +32 to center on 64x64 sprite
                 pygame.draw.circle(screen, (78, 149, 217), shield_center, 40, 3)
@@ -780,7 +781,7 @@ def main():
                         print(nearby_potion.name)
                         print("Picked potion")
 
-                if event.key == pygame.K_x:
+                if event.key == pygame.K_r:
                     if len(inventory) > 0:
                         item = inventory.pop(0)
                         if item.name == "Potion":
