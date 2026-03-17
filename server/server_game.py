@@ -9,6 +9,7 @@ import time
 
 from itertools import count
 
+import gs_and_lb_helper_functions
 import pygame
 from aioquic.asyncio import QuicConnectionProtocol, serve
 from aioquic.quic.configuration import QuicConfiguration
@@ -44,6 +45,12 @@ monsters_list = []
 SERVER_FPS = 0
 SKILL_COOL_TIME = 12
 
+LB_PORT = 8080
+
+MY_IP = gs_and_lb_helper_functions.get_local_ip()
+MY_PORT = 4433
+
+
 def load_map():
     with open("map.txt", "r") as f:
         lines = f.readlines()
@@ -59,6 +66,16 @@ class GameState:
     active_bullets = {}  # bullet_id -> {x, y, angle}
     players_skills = {}  #client_id -> {skill name, is active, last activation time}
     players_potions = {}
+
+    #lb info
+    neighbor = {}  # left -> x,ip,port /right -> x,ip,port
+    lb_host = None
+    lb_port = LB_PORT
+    lb_writer = None
+    server_id = None
+    server_area_left = None
+    server_area_right = None
+
     #game info
     map_weapons = {}  # weapon_id -> {x, y, type}
     game_map = load_map()
@@ -971,72 +988,6 @@ def check_movement(new_pos, old_pos, skill):
     return False
 
 
-
-def spawn_random_monsters(amount):
-    tiles_high = len(state.game_map)
-    tiles_wide = len(state.game_map[0])
-    global monsters_list
-    monsters_list = []
-    spawned = 0
-    while spawned < amount:
-        tile_x = random.randint(0, tiles_wide - 1)
-        tile_y = random.randint(0, tiles_high - 1)
-        if state.game_map[tile_y][tile_x] == ".":
-            pixel_x = float(tile_x * TILE_SIZE)
-            pixel_y = float(tile_y * TILE_SIZE)
-            monster = Monster(pixel_x, pixel_y, 100)
-            monsters_list.append(monster)
-            spawned += 1
-    print(f"Server initialized with {spawned} monsters on the map.")
-
-def spawn_loot_per_camera_zone(game_map, per_zone=2):
-    loot_list = []
-    tiles_wide = len(game_map[0])
-    tiles_high = len(game_map)
-    zone_tiles_x = SCREEN_WIDTH // TILE_SIZE
-    zone_tiles_y = SCREEN_HEIGHT // TILE_SIZE
-    for win_y in range(0, tiles_high, zone_tiles_y):
-        for win_x in range(0, tiles_wide, zone_tiles_x):
-            spawned = 0
-            attempts = 0
-            while spawned < per_zone and attempts < 50:
-                attempts += 1
-                tile_x = random.randint(win_x, min(win_x + zone_tiles_x - 1, tiles_wide - 1))
-                tile_y = random.randint(win_y, min(win_y + zone_tiles_y - 1, tiles_high - 1))
-                if game_map[tile_y][tile_x] != "#":
-                    x = tile_x * TILE_SIZE
-                    y = tile_y * TILE_SIZE
-                    name = random.choice(WEAPON_NAMES)
-                    loot_list.append((x, y, name))
-                    new_id = random.randint(1, int(MAX_WEAPONS))
-                    while new_id in state.map_weapons:
-                        new_id = random.randint(1, int(MAX_WEAPONS))
-                    state.map_weapons[new_id] = {"x": x, "y": y, "type": name}
-                    spawned += 1
-
-def spawn_potions_per_camera_zone(game_map, per_zone=2):
-    tiles_wide = len(game_map[0])
-    tiles_high = len(game_map)
-    zone_tiles_x = SCREEN_WIDTH // TILE_SIZE
-    zone_tiles_y = SCREEN_HEIGHT // TILE_SIZE
-    for win_y in range(0, tiles_high, zone_tiles_y):
-        for win_x in range(0, tiles_wide, zone_tiles_x):
-            spawned = 0
-            attempts = 0
-            while spawned < per_zone and attempts < 50:
-                attempts += 1
-                tile_x = random.randint(win_x, min(win_x + zone_tiles_x - 1, tiles_wide - 1))
-                tile_y = random.randint(win_y, min(win_y + zone_tiles_y - 1, tiles_high - 1))
-                if game_map[tile_y][tile_x] != "#":
-                    x = tile_x * TILE_SIZE
-                    y = tile_y * TILE_SIZE
-                    new_id = random.randint(1, int(MAX_POTION))
-                    while new_id in state.map_potion:
-                        new_id = random.randint(1, int(MAX_POTION))
-                    item = POTION_LIST[0]
-                    state.map_potion[new_id] = {"x": x, "y": y, "type": item[0]}
-                    spawned += 1
-
 async def monsters_manager():
     global monsters_list
     if not monsters_list:
@@ -1142,7 +1093,292 @@ skills_dict = {
         "Shield": Skill("Shield", 6, 0, False),
         "Bombs": Skill("Bombs", 7, 0, False)
 }
+
+
+#lb functions
+
+
+async def connect_to_lb():
+    while True:
+        try:
+            print(f"[*] Attempting to connect to LB at {state.lb_host}:{state.lb_port}...")
+
+            reader, writer = await asyncio.open_connection(state.lb_host, state.lb_port , limit=1024 * 1024 * 10)
+            state.lb_writer = writer
+
+            connect_msg = f"Server connect|{MY_IP}|{psutil.cpu_percent()}|{MY_PORT}\n"
+            writer.write(connect_msg.encode())
+            await writer.drain()
+
+            asyncio.create_task(send_heartbeats_to_lb(writer))
+
+            while True:
+                line = await reader.readline()
+                if not line:
+                    break
+
+                msg = line.decode().strip()
+
+
+                if msg.startswith("Connected|"):
+                    state.server_id = int(msg.split("|")[1])
+                    print(f"[LB] Assigned ID: {state.server_id}")
+
+
+
+                elif msg.startswith("UpdateStats|"):
+
+                    try:
+                        parts = msg.split("|")
+                        state.server_area = {
+                            "t-l": float(parts[1]),
+                            "t-r": float(parts[2])
+                        }
+
+                        weapons = msg.split("|")[3]
+                        weapons = weapons.split(";")
+
+                        for weapon in weapons:
+                            x_str = weapon.split(",")[0]
+                            y_str = weapon.split(",")[1]
+                            w_str = weapon.split(",")[2]
+                            new_id = random.randint(1, 1000000)
+
+                            while new_id in state.map_weapons:
+                                new_id = random.randint(1, 1000000)
+
+                            state.map_weapons[new_id] = {
+                                "x": float(x_str),
+                                "y": float(y_str),
+                                "type": w_str,
+
+                            }
+
+                        potions = msg.split("|")[4]
+                        potions = potions.split(";")
+
+                        for potion in potions:
+                            x_str = potion.split(",")[0]
+                            y_str = potion.split(",")[1]
+                            p_type = potion.split(",")[2]
+                            new_id = random.randint(1, 1000000)
+
+                            while new_id in state.map_potion:
+                                new_id = random.randint(1, 1000000)
+
+                            state.map_potion[new_id] = {
+                                "x": float(x_str),
+                                "y": float(y_str),
+                                "type": p_type,
+                            }
+
+                    except Exception as e:
+                        print("[LB] Failed parsing UpdateArea:", e)
+
+                elif msg.startswith("GET-WEAPON"):
+                    try:
+                        parts = msg.split("|")[1:]
+                        for weapons in parts:
+                            x_str = weapons.split(",")[0]
+                            y_str = weapons.split(",")[0]
+                            w_type = weapons.split(",")[0]
+                            new_id = random.randint(1, 1000000)
+                            while new_id in state.map_weapons:
+                                new_id = random.randint(1, 1000000)
+
+                            state.map_weapons[new_id] = {
+                                "x": float(x_str),
+                                "y": float(y_str),
+                                "type": w_type,
+                            }
+                    except:
+                        print("Error while getting weapons from lb")
+
+                elif msg.startswith("GET-MONSTER"):
+                    try:
+                        parts = msg.split("|")[1:]
+                        for monsters in parts:
+                            pixel_x = monsters.split(",")[0]
+                            pixel_y = monsters.split(",")[1]
+                            hp = monsters.split(",")[2]
+                            monster = Monster(pixel_x, pixel_y, hp)
+                            monsters_list.append(monster)
+                    except:
+                        print("Error while getting monsters from lb")
+
+
+
+                elif msg.startswith("GET-POTION"):
+                    try:
+                        parts = msg.split("|")[1:]
+                        for potions in parts:
+                            x_str = potions.split(",")[0]
+                            y_str = potions.split(",")[0]
+                            w_type = potions.split(",")[0]
+                            new_id = random.randint(1, 1000000)
+                            while new_id in state.map_potion:
+                                new_id = random.randint(1, 1000000)
+
+                            state.map_weapons[new_id] = {
+                                "x": float(x_str),
+                                "y": float(y_str),
+                                "type": w_type,
+                            }
+                    except:
+                        print("Error while getting potion from lb")
+
+
+
+                elif msg.startswith("TransferClient|"):
+                    _, c_id, n_ip, n_port = msg.split("|")
+
+                    for client in list(state.active_clients):
+                        if client._quic.host_cid.hex() == c_id:
+                            print(f"[LB] Sending SWITCH to client {c_id} -> {n_ip}:{n_port}")
+
+                            switch_msg = f"SWITCH|{n_ip}|{n_port}\n".encode()
+                            client._quic.send_stream_data(client.stream_id, switch_msg)
+                            client.transmit()
+
+        except Exception as e:
+            print(f"[LB] Connection error: {e}. Retrying in 5 seconds...")
+            state.lb_writer = None
+            await asyncio.sleep(5)
+
+
+async def send_to_lb(message: str):
+    if state.lb_writer is not None:
+        try:
+            # חשוב להוסיף \n בסוף כדי שה-LB יוכל לקרוא עם readline()
+            if not message.endswith("\n"):
+                message += "\n"
+
+            state.lb_writer.write(message.encode())
+            await state.lb_writer.drain()
+        except Exception as e:
+            print(f"Error sending to LB: {e}")
+            state.lb_writer = None  # איפוס כדי ש-connect_to_lb ינסה להתחבר מחדש
+    else:
+        print("LB connection not available.")
+
+
+async def register_with_lb_once(lb_ip: str, timeout: float = 5.0) -> bool:
+    try:
+        print(f"[*] Trying one-shot registration to LB {lb_ip}:{LB_PORT} ...")
+        reader, writer = await asyncio.open_connection(lb_ip, LB_PORT, limit=1024 * 1024 * 10)
+
+        connect_msg = f"Server connect|{MY_IP}|{psutil.cpu_percent()}|{MY_PORT}\n"
+        writer.write(connect_msg.encode())
+        await writer.drain()
+
+        end_time = time.time() + timeout
+
+        while time.time() < end_time:
+            try:
+                remaining = max(0.1, end_time - time.time())
+                line = await asyncio.wait_for(reader.readline(), timeout=remaining)
+            except asyncio.TimeoutError:
+                break
+
+            if not line:
+                break
+
+            msg = line.decode().strip()
+
+            if msg.startswith("Connected|"):
+                try:
+                    state.server_id = int(msg.split("|")[1])
+                    print(f"[LB] Assigned temporary ID: {state.server_id}")
+                except:
+                    pass
+
+            elif msg.startswith("UpdateStats|"):
+                try:
+                    parts = msg.split("|")
+                    state.server_area = {
+                        "t-l": float(parts[1]),
+                        "t-r": float(parts[2])
+                    }
+                    weapons = msg.split("|")[3]
+                    weapons = weapons.split(";")
+                    for weapon in weapons:
+                        x_str = weapon.split(",")[0]
+                        y_str = weapon.split(",")[1]
+                        w_str = weapon.split(",")[2]
+                        new_id = random.randint(1, 1000000)
+                        while new_id in state.map_weapons:
+                            new_id = random.randint(1, 1000000)
+
+                        state.map_weapons[new_id] = {
+                            "x": float(x_str),
+                            "y": float(y_str),
+                            "type": w_str,
+                        }
+                    potions = msg.split("|")[4]
+                    potions = potions.split(";")
+                    for potion in potions:
+                        x_str = potion.split(",")[0]
+                        y_str = potion.split(",")[1]
+                        p_type = potion.split(",")[2]
+
+                        new_id = random.randint(1, 1000000)
+                        while new_id in state.map_potion:
+                            new_id = random.randint(1, 1000000)
+
+                        state.map_potion[new_id] = {
+                            "x": float(x_str),
+                            "y": float(y_str),
+                            "type": p_type,
+                        }
+
+
+                    writer.close()
+                    await writer.wait_closed()
+                    return True
+
+                except Exception as e:
+                    print("[LB] Failed parsing UpdateArea:", e)
+                    break
+
+        writer.close()
+        await writer.wait_closed()
+
+        print("[LB] One-shot registration failed or timed out.")
+        return False
+
+    except Exception as e:
+        print(f"[LB] Connection error in one-shot registration: {e}")
+        return False
+
+
+async def send_heartbeats_to_lb(writer):
+    try:
+        while True:
+            if state.server_id is not None:
+                msg = f"Server heartbeat|{state.server_id}|{psutil.cpu_percent()}\n"
+                writer.write(msg.encode())
+                await writer.drain()
+
+            await asyncio.sleep(5)
+
+    except Exception as e:
+        print("[LB] Heartbeat stopped:", e)
+
+
 async def main():
+    while True:
+        lb_ip = await asyncio.to_thread(input, "Enter Load Balancer IP (default 127.0.0.1): ")
+        lb_ip = lb_ip.strip() or "127.0.0.1"
+
+        ok = await register_with_lb_once(lb_ip, timeout=5.0)
+        if ok:
+            state.lb_host = lb_ip
+            state.lb_port = LB_PORT
+            print(f"[+] Registered with LB at {lb_ip}:{LB_PORT}")
+            break
+        else:
+            print("[!] Could not register with LB. Try another IP or check the LB is running.\n")
+
     config = QuicConfiguration(
         is_client=False,
         alpn_protocols=["echo-protocol"],
@@ -1163,9 +1399,6 @@ async def main():
 
 
 if __name__ == "__main__":
-    spawn_loot_per_camera_zone(state.game_map)
-    spawn_random_monsters(MONSTERS_AMOUNT)
-    spawn_potions_per_camera_zone(state.game_map)
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
