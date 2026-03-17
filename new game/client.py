@@ -383,29 +383,67 @@ class Player:
         self.hp = 100
         self.speed = 4
         self.direction = "up"
-        self.size = 64  # player size
+        self.size = 64
 
-        # Load sprites
+        # Animation state
+        self.anim_frame = 0
+        self.anim_timer = 0
+        self.anim_speed = 8
+        self.is_moving = False
+
+        # Base sprites: 2 frames per direction, left is mirrored right
+        right_0 = pygame.transform.scale(pygame.image.load("img/right_1.png"), (64, 64))
+        right_1 = pygame.transform.scale(pygame.image.load("img/right_2.png"), (64, 64))
+        left_0  = pygame.transform.flip(right_0, True, False)
+        left_1  = pygame.transform.flip(right_1, True, False)
+
         self.base_sprites = {
-            "up": pygame.transform.scale(pygame.image.load("img/upSprite.png"), (64, 64)),
-            "down": pygame.transform.scale(pygame.image.load("img/soldier.png"), (64, 64)),
-            "left": pygame.transform.scale(pygame.image.load("img/soldier_left.png"), (64, 64)),
-            "right": pygame.transform.scale(pygame.image.load("img/soldier_right.png"), (64, 64)),
+            "up":    [
+                pygame.transform.scale(pygame.image.load("img/upSprite.png"), (64, 64)),
+                pygame.transform.scale(pygame.image.load("img/upSprite.png"), (64, 64)),
+            ],
+            "down":  [
+                pygame.transform.scale(pygame.image.load("img/down_1.png"), (64, 64)),
+                pygame.transform.scale(pygame.image.load("img/down_2.png"), (64, 64)),
+            ],
+            "left":  [left_0, left_1],
+            "right": [right_0, right_1],
         }
 
+        # Weapon sprites: single frame per direction (no animation)
+        w_right_0 = pygame.transform.scale(pygame.image.load("img/soldier_right_gun.png").convert_alpha(), (64, 64))
+        w_right_1 = pygame.transform.scale(pygame.image.load("img/soldier_right_gun.png").convert_alpha(), (64, 64))
+        w_left_0 = pygame.transform.flip(w_right_0, True, False)
+        w_left_1 = pygame.transform.flip(w_right_1, True, False)
+
         self.weapon_sprites = {
-            "up": pygame.transform.scale(pygame.image.load("img/soldier_left_gun.png").convert_alpha(), (64, 64)),
-            "down": pygame.transform.scale(pygame.image.load("img/soldier_down_gun.png").convert_alpha(), (64, 64)),
-            "left": pygame.transform.scale(pygame.image.load("img/soldier_left_gun.png").convert_alpha(), (64, 64)),
-            "right": pygame.transform.scale(pygame.image.load("img/soldier_right_gun.png").convert_alpha(), (64, 64)),
+            "up": [
+                pygame.transform.scale(pygame.image.load("img/soldier_left_gun.png").convert_alpha(), (64, 64)),
+                pygame.transform.scale(pygame.image.load("img/soldier_left_gun.png").convert_alpha(), (64, 64)),
+            ],
+            "down": [
+                pygame.transform.scale(pygame.image.load("img/adown1.png").convert_alpha(), (64, 64)),
+                pygame.transform.scale(pygame.image.load("img/adown2.png").convert_alpha(), (64, 64)),
+            ],
+            "left": [w_left_0, w_left_1],
+            "right": [w_right_0, w_right_1],
         }
 
         self.auto_walk = False
         self.wander_direction = "down"
         self.wander_timer = 0
+        self.inventory = []
+        self.selected_slot = 0
 
-        self.inventory = []  # כאן נשמור את כל הנשקים שהשחקן אוסף
-        self.selected_slot =0   # איזה סלוט מחובר כרגע (אם רוצים לירות ממנו)
+    def _update_animation(self):
+        if self.is_moving:
+            self.anim_timer += 1
+            if self.anim_timer >= self.anim_speed:
+                self.anim_timer = 0
+                self.anim_frame = 1 - self.anim_frame
+        else:
+            self.anim_frame = 0
+            self.anim_timer = 0
 
     def pick_item(self, item):
         self.inventory.append(item)
@@ -424,7 +462,6 @@ class Player:
     def drop_selected_weapon(self):
         if 0 <= self.selected_slot < len(self.inventory):
             weapon = self.inventory.pop(self.selected_slot)
-            # אם נשארו פחות נשקים, מתקן את selected_slot
             if self.selected_slot >= len(self.inventory):
                 self.selected_slot = max(len(self.inventory) - 1, 0)
             return weapon
@@ -433,7 +470,6 @@ class Player:
     def move(self, keys, game_map, tile_size):
         moved = False
 
-        # --- Manual movement ---
         if keys[pygame.K_w]:
             if not collides_with_wall(game_map, self.x, self.y - self.speed, self.size, tile_size):
                 self.y -= self.speed
@@ -460,44 +496,38 @@ class Player:
 
         if moved:
             outgoing_messages.put(f"UPDATE|{self.x},{self.y}")
-        # --- Auto-walk wandering ---
+
         if self.auto_walk and not moved:
             outgoing_messages.put(f"UPDATE|{self.x},{self.y}")
             if self.wander_timer <= 0:
                 self.pick_random_direction()
-
             self.wander_timer -= 1
-
-            dx = 0
-            dy = 0
-
-            if self.wander_direction == "up":
-                dy = -self.speed
-            elif self.wander_direction == "down":
-                dy = self.speed
-            elif self.wander_direction == "left":
-                dx = -self.speed
-            elif self.wander_direction == "right":
-                dx = self.speed
-
+            dx, dy = 0, 0
+            if self.wander_direction == "up":     dy = -self.speed
+            elif self.wander_direction == "down":  dy =  self.speed
+            elif self.wander_direction == "left":  dx = -self.speed
+            elif self.wander_direction == "right": dx =  self.speed
             if not collides_with_wall(game_map, self.x + dx, self.y + dy, self.size, tile_size):
                 self.x += dx
                 self.y += dy
+            moved = True
+
+        self.is_moving = moved
+        self._update_animation()
 
     def draw(self, screen, camera_x, camera_y):
         if self.has_weapon_equipped():
-            sprite = self.weapon_sprites[self.direction]
+            sprite = self.weapon_sprites[self.direction][self.anim_frame]  # now uses frame index
         else:
-            sprite = self.base_sprites[self.direction]
-        # Draw player sprite
+            sprite = self.base_sprites[self.direction][self.anim_frame]
+
         screen.blit(sprite, (self.x - camera_x, self.y - camera_y))
 
-        # --- HEALTH BAR ---
+        # Health bar
         bar_width = 100
         bar_height = 5
         bar_x = self.x - camera_x + (self.size // 2) - (bar_width // 2)
-        bar_y = self.y - camera_y - 10  # 10px above the player
-
+        bar_y = self.y - camera_y - 10
         for i in range(bar_width):
             color = (0, 255, 0) if i < self.hp else (255, 0, 0)
             pygame.draw.line(screen, color, (bar_x + i, bar_y), (bar_x + i, bar_y + bar_height))
