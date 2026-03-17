@@ -202,7 +202,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 self.broadcast_player(client_id, new_pos, state.players_hp[client_id], False)
                 new_x = float(new_pos.split(",")[0])
 
-                if True: #state.players_control[client_id]:
+                if True:#state.players_control[client_id]:
                     if state.neighbor['left'] is not None:
                         if new_x < state.server_area_left: #if he is getting out ouf the server zone
                             nei_ip = state.neighbor['left'].split(',')[0]
@@ -1126,7 +1126,7 @@ def broadcast_visible_monsters():
 
 async def check_cpu():
     while True:
-        print("CPU:", psutil.cpu_percent(interval=1.0))
+        print("CPU:", psutil.cpu_percent(interval=None))
         await asyncio.sleep(20)
 
 async def track_server_fps():
@@ -1343,49 +1343,12 @@ async def connect_to_lb():
 
 
                         weapons = msg.split("|")[5]
-
                         await update_game_weapons_from_lb(weapons)
 
 
 
                         potions = msg.split("|")[6]
                         await update_game_potions_from_lb(potions)
-                        potions = potions.split(";")
-
-
-                        for old_potion in state.map_potion:
-                            pos_str = f"{state.map_potion[old_potion]['x']},{state.map_potion[old_potion]['y']}"
-                            type_str = state.map_potion[old_potion]["type"]
-                            msg = f"UNDROPPED|{pos_str}|{type_str}\n".encode("utf-8")
-                            for client in list(state.active_clients):
-                                if client.stream_id is None:
-                                    continue
-                                client._quic.send_stream_data(client.stream_id, msg, end_stream=False)
-                                client.transmit()
-
-                        state.map_potion = {}
-
-
-                        for potion in potions:
-                            x_str = potion.split(",")[0]
-                            y_str = potion.split(",")[1]
-                            p_type = potion.split(",")[2]
-                            new_id = random.randint(1, 1000000)
-
-                            while new_id in state.map_potion:
-                                new_id = random.randint(1, 1000000)
-
-                            state.map_potion[new_id] = {
-                                "x": float(x_str),
-                                "y": float(y_str),
-                                "type": p_type,
-                            }
-                            msg = f"POTIONS|{x_str},{y_str}|{p_type}\n".encode("utf-8")
-                            for client in list(state.active_clients):
-                                if client.stream_id is None:
-                                    continue
-                                client._quic.send_stream_data(client.stream_id, msg, end_stream=False)
-                                client.transmit()
 
                     except Exception as e:
                         print("[LB] Failed parsing UpdateArea:", e)
@@ -1550,11 +1513,15 @@ async def send_heartbeats_to_lb(writer):
     try:
         while True:
             if state.server_id is not None:
-                msg = f"Server heartbeat|{state.server_id}|{psutil.cpu_percent()}\n"
-                to_send = state.pending_lb_updates
+                msg = f"Server heartbeat|{state.server_id}|{psutil.cpu_percent()}"
+
+                to_send = state.pending_lb_updates.copy()
+                state.pending_lb_updates.clear()
+
                 for report in to_send:
                     msg += "|" + report
-                    state.pending_lb_updates.remove(report)
+
+                msg += "\n"
                 writer.write(msg.encode())
                 await writer.drain()
 

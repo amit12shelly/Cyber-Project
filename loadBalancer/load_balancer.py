@@ -216,7 +216,6 @@ async def handle_gs_lifecycle(reader, writer):
                     # אם ה-CPU השתנה משמעותית -> מחלקים מחדש
                     if abs(old_cpu - cpu_load) > 100: #or len(parts) > 3 אם יש שינויים בדברים
                         await divide_map()
-                    break
 
             elif parts[0] == "GetServer":
                 px = int(parts[1])
