@@ -1,8 +1,6 @@
 import asyncio
 import math
 import random
-from pickle import GLOBAL
-
 import psutil
 import heapq
 import time
@@ -125,10 +123,6 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 state.players_hp[client_id] = parts[2]
 
 
-
-
-
-
             state.players_inventory[client_id] = {int(i): {"type": "none", "ammo": 0} for i in range(INVENTORY_SIZE)}
             state.players_potions[client_id] = 0
 
@@ -210,13 +204,13 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                     print("Error while splitting the pos in the ATTACK command!")
                     return
                 angle = float(parts[2])
-
-                center_x = float(x_str) + 32
-                center_y = float(y_str) + 32
+                angle_rad = math.radians(angle)
+                center_x = float(x_str) + 32 + math.cos(angle_rad) * 20
+                center_y = float(y_str) + 32 + math.sin(angle_rad) * 20 -8
 
                 state.active_bullets[new_id] = {
-                    "x": center_x + 28,
-                    "y": center_y - 8,
+                    "x": center_x,
+                    "y": center_y,
                     "angle": angle,
                 }
 
@@ -267,12 +261,13 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 print("Error while splitting the pos in the ATTACK command!")
                 return
             angle = float(parts[2])
-            center_x = float(x_str) + 32
-            center_y = float(y_str) + 32
+            angle_rad = math.radians(angle)
+            center_x = float(x_str) + 32 + math.cos(angle_rad) * 20
+            center_y = float(y_str) + 32 + math.sin(angle_rad) * 20 -8
 
             state.active_bullets[new_id] = {
-                "x": center_x + 28,
-                "y": center_y - 8,
+                "x": center_x,
+                "y": center_y,
                 "angle": angle,
             }
             print("shooting!")
@@ -831,7 +826,7 @@ async def monster_gun_tracking(bullet_id: int, gun_type: str, start_x: float, st
     y = start_y
     pos = f"{x},{y}"
 
-    msg_show = f"SHOW-BULLET|{pos}|{angle}|{bullet_id}\n".encode()
+    msg_show = f"SHOW-BULLET|{pos}|{angle}|{bullet_id}|bullet\n".encode()
     for client in list(state.active_clients):
         if client.stream_id is not None:
             client._quic.send_stream_data(client.stream_id, msg_show, end_stream=False)
@@ -995,21 +990,21 @@ def check_movement(new_pos, old_pos, skill):
 
 
 def spawn_random_monsters(amount):
-    # tiles_high = len(state.game_map)
-    # tiles_wide = len(state.game_map[0])
-    # global monsters_list
-    # monsters_list = []
-    # spawned = 0
-    # while spawned < amount:
-    #     tile_x = random.randint(0, tiles_wide - 1)
-    #     tile_y = random.randint(0, tiles_high - 1)
-    #     if state.game_map[tile_y][tile_x] == ".":
-    #         pixel_x = float(tile_x * TILE_SIZE)
-    #         pixel_y = float(tile_y * TILE_SIZE)
-    #         monster = Monster(pixel_x, pixel_y, 100)
-    #         monsters_list.append(monster)
-    #         spawned += 1
-    # print(f"Server initialized with {spawned} monsters on the map.")
+    tiles_high = len(state.game_map)
+    tiles_wide = len(state.game_map[0])
+    global monsters_list
+    monsters_list = []
+    spawned = 0
+    while spawned < amount:
+        tile_x = random.randint(0, tiles_wide - 1)
+        tile_y = random.randint(0, tiles_high - 1)
+        if state.game_map[tile_y][tile_x] == ".":
+            pixel_x = float(tile_x * TILE_SIZE)
+            pixel_y = float(tile_y * TILE_SIZE)
+            monster = Monster(pixel_x, pixel_y, 100)
+            monsters_list.append(monster)
+            spawned += 1
+    print(f"Server initialized with {spawned} monsters on the map.")
     return
 
 def spawn_loot_per_camera_zone(game_map, per_zone=2):

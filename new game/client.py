@@ -8,8 +8,6 @@ from queue import Queue
 from aioquic.asyncio import connect
 from aioquic.quic.configuration import QuicConfiguration
 
-from server.server_game import SKILL_COOL_TIME
-
 SERVER_IP = "127.0.0.1"
 SERVER_PORT = 4433
 TOLERANCE = 5
@@ -699,6 +697,8 @@ def main():
     }
     skill = skills_dict["Shield"]
     player = Player(128, 128, skill)
+    shoot_direction_timer = 0
+    shoot_direction = None
     chat_font = pygame.font.SysFont("monospace", CHAT_FONT_SIZE)
     chat_open = False
     chat_input = ""
@@ -851,6 +851,13 @@ def main():
                     dx = world_mouse_x - player_center_x
                     dy = world_mouse_y - player_center_y
                     angle_degrees = math.degrees(math.atan2(dy, dx))
+                    # שמור כיוון ירי זמני
+                    if abs(dx) > abs(dy):
+                        shoot_direction = "right" if dx > 0 else "left"
+                    else:
+                        shoot_direction = "down" if dy > 0 else "up"
+                    shoot_direction_timer = 10  # 10 פריימים
+
                     outgoing_messages.put(f"ATTACK|{player.selected_slot}|{angle_degrees}")
 
         if not chat_open:
@@ -996,7 +1003,6 @@ def main():
                 elif parts[2] == "Poison":
                     hp_items.append(Potion(x_potion, y_potion, poison_img, "Poison"))
 
-                    hp_items.append(Potion(x_potion,y_potion,potion_img))
             elif parts[0] == "SKILL":
                 player_id = parts[1]
                 player_skill = parts[2]
@@ -1032,7 +1038,9 @@ def main():
         for item in loot_items:
             item.update()
             item.draw(screen, camera_x, camera_y)
-
+        if shoot_direction_timer > 0:
+            shoot_direction_timer -= 1
+            player.direction = shoot_direction
         player.draw(screen, camera_x, camera_y, active_skills)
         for rp in remote_players.values():
             rp.draw(screen, camera_x, camera_y, active_skills)
