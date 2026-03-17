@@ -167,16 +167,56 @@ async def handle_gs_lifecycle(reader, writer):
                 gs_id = int(parts[1])
                 cpu_load = float(parts[2])
 
+                target_server = None
                 for s in servers:
                     if s.id == gs_id:
-                        old_cpu = s.cpu
-                        s.cpu = cpu_load
-                        s.last_seen = time.time()
-
-                        # אם ה-CPU השתנה משמעותית -> מחלקים מחדש
-                        if abs(old_cpu - cpu_load) > 100:
-                            await divide_map()
+                        target_server = s
                         break
+
+                if target_server:
+                    old_cpu = target_server.cpu
+                    target_server.cpu = cpu_load
+                    target_server.last_seen = time.time()
+
+                    for cmd_part in parts[3:]:
+                        if not cmd_part or ":" not in cmd_part:
+                            continue
+
+                        cmd_type, data = cmd_part.split(":", 1)
+
+                        if cmd_type == "add":
+                            x, y, item_kind = data.split(",")
+                            x, y = int(x), int(y)
+                            new_id = int(time.time() * 1000)
+
+                            if "potion" in item_kind.lower() or "poison" in item_kind.lower():
+                                potions_manager.state.map_potions[new_id] = {"x": x, "y": y, "type": item_kind}
+                            else:
+                                weapons_manager.state.map_weapons[new_id] = {"x": x, "y": y, "type": item_kind}
+
+                        elif cmd_type == "remove":
+                            # פורמט: remove:x,y,item_type
+                            x, y, item_kind = data.split(",")
+                            x, y = int(x), int(y)
+
+                            # חיפוש ומחיקה מהמנהל המתאים
+                            if "potion" in item_kind.lower() or "poison" in item_kind.lower():
+                                to_delete = [id for id, d in potions_manager.state.map_potions.items()
+                                             if d["x"] == x and d["y"] == y]
+                                for id_del in to_delete: del potions_manager.state.map_potions[id_del]
+                            else:
+                                to_delete = [id for id, d in weapons_manager.state.map_weapons.items()
+                                             if d["x"] == x and d["y"] == y]
+                                for id_del in to_delete: del weapons_manager.state.map_weapons[id_del]
+
+                        elif cmd_type == "chat":
+                            # כאן אפשר להוסיף לוגיקה להעברת הודעות צ'אט גלובליות אם תרצה
+                            pass
+
+                    # אם ה-CPU השתנה משמעותית -> מחלקים מחדש
+                    if abs(old_cpu - cpu_load) > 100: #or len(parts) > 3 אם יש שינויים בדברים
+                        await divide_map()
+                    break
 
             elif parts[0] == "GetServer":
                 px = int(parts[1])
