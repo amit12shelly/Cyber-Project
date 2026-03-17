@@ -1,7 +1,6 @@
 import asyncio
 import math
 import random
-from pickle import GLOBAL
 
 import psutil
 import heapq
@@ -1143,6 +1142,122 @@ skills_dict = {
 
 #lb functions
 
+async def update_game_weapons_from_lb(weapons_string, bigger=True):
+    lb_weapons_set = set()
+
+    if weapons_string and weapons_string != "None":
+        weapons_list = weapons_string.split(";")
+        for weapon_str in weapons_list:
+            if not weapon_str:
+                continue
+            parts = weapon_str.split(",")
+            if len(parts) >= 3:
+                x_val = float(parts[0])
+                y_val = float(parts[1])
+                w_type = parts[2]
+                lb_weapons_set.add((x_val, y_val, w_type))
+
+    if bigger:
+        for x_val, y_val, w_type in lb_weapons_set:
+            weapon_exists = False
+            for existing_weapon in state.map_weapons.values():
+                if existing_weapon["x"] == x_val and existing_weapon["y"] == y_val and existing_weapon[
+                    "type"] == w_type:
+                    weapon_exists = True
+                    break
+
+            if not weapon_exists:
+                new_id = random.randint(1, 1000000)
+                while new_id in state.map_weapons:
+                    new_id = random.randint(1, 1000000)
+
+                state.map_weapons[new_id] = {
+                    "x": x_val,
+                    "y": y_val,
+                    "type": w_type
+                }
+
+                clients_msg = f"DROPPED|{x_val},{y_val}|{w_type}\n".encode("utf-8")
+                for client in list(state.active_clients):
+                    if client.stream_id is not None:
+                        client._quic.send_stream_data(client.stream_id, clients_msg, end_stream=False)
+                        client.transmit()
+
+    keys_to_delete = []
+
+    for w_id, existing_weapon in state.map_weapons.items():
+        weapon_tuple = (existing_weapon["x"], existing_weapon["y"], existing_weapon["type"])
+
+        if weapon_tuple not in lb_weapons_set:
+            keys_to_delete.append((w_id, existing_weapon))
+
+    for w_id, w_data in keys_to_delete:
+        del state.map_weapons[w_id]
+
+        clients_msg = f"UNDROPPED|{w_data['x']},{w_data['y']}|{w_data['type']}\n".encode("utf-8")
+        for client in list(state.active_clients):
+            if client.stream_id is not None:
+                client._quic.send_stream_data(client.stream_id, clients_msg, end_stream=False)
+                client.transmit()
+
+
+async def update_game_potions_from_lb(potions_string):
+    lb_potions_set = set()
+
+    # בודקים שיש סטרינג ושהוא לא "None"
+    if potions_string and potions_string != "None":
+        # מפצלים את הסטרינג הגדול לרשימה של שיקויים
+        potions_list = potions_string.split(";")
+        for potion_str in potions_list:
+            if not potion_str:
+                continue
+            parts = potion_str.split(",")
+            if len(parts) >= 3:
+                x_val = float(parts[0])
+                y_val = float(parts[1])
+                p_type = parts[2]
+                lb_potions_set.add((x_val, y_val, p_type))
+
+    for x_val, y_val, p_type in lb_potions_set:
+        potion_exists = False
+        for existing_potion in state.map_potion.values():
+            if existing_potion["x"] == x_val and existing_potion["y"] == y_val and existing_potion["type"] == p_type:
+                potion_exists = True
+                break
+
+        if not potion_exists:
+            new_id = random.randint(1, 1000000)
+            while new_id in state.map_potion:
+                new_id = random.randint(1, 1000000)
+
+            state.map_potion[new_id] = {
+                "x": x_val,
+                "y": y_val,
+                "type": p_type
+            }
+
+            clients_msg = f"DROPPED|{x_val},{y_val}|{p_type}\n".encode("utf-8")
+            for client in list(state.active_clients):
+                if client.stream_id is not None:
+                    client._quic.send_stream_data(client.stream_id, clients_msg, end_stream=False)
+                    client.transmit()
+
+    keys_to_delete = []
+
+    for p_id, existing_potion in state.map_potion.items():
+        potion_tuple = (existing_potion["x"], existing_potion["y"], existing_potion["type"])
+
+        if potion_tuple not in lb_potions_set:
+            keys_to_delete.append((p_id, existing_potion))
+
+    for p_id, p_data in keys_to_delete:
+        del state.map_potion[p_id]
+
+        clients_msg = f"UNDROPPED|{p_data['x']},{p_data['y']}|{p_data['type']}\n".encode("utf-8")
+        for client in list(state.active_clients):
+            if client.stream_id is not None:
+                client._quic.send_stream_data(client.stream_id, clients_msg, end_stream=False)
+                client.transmit()
 
 async def connect_to_lb():
     while True:
@@ -1208,40 +1323,11 @@ async def connect_to_lb():
 
 
                         weapons = msg.split("|")[5]
-                        weapons = weapons.split(";")
 
-                        for old_weapon in state.map_weapons:
-                            pos_str = f"{state.map_weapons[old_weapon]['x']},{state.map_weapons[old_weapon]['y']}"
-                            type_str = state.map_weapons[old_weapon]["type"]
-                            clients_msg = f"UNDROPPED|{pos_str}|{type_str}\n".encode("utf-8")
-                            for client in list(state.active_clients):
-                                if client.stream_id is None:
-                                    continue
-                                client._quic.send_stream_data(client.stream_id, clients_msg, end_stream=False)
-                                client.transmit()
-                        state.map_weapons = {}
+                        await update_game_weapons_from_lb(weapons)
+                        await update_game_potions_from_lb(weapons)
 
-                        for weapon in weapons:
-                            x_str = weapon.split(",")[0]
-                            y_str = weapon.split(",")[1]
-                            w_str = weapon.split(",")[2]
-                            new_id = random.randint(1, 1000000)
 
-                            while new_id in state.map_weapons:
-                                new_id = random.randint(1, 1000000)
-
-                            state.map_weapons[new_id] = {
-                                "x": float(x_str),
-                                "y": float(y_str),
-                                "type": w_str,
-
-                            }
-                            clients_msg = f"DROPPED|{x_str},{y_str}|{w_str}\n".encode("utf-8")
-                            for client in list(state.active_clients):
-                                if client.stream_id is None:
-                                    continue
-                                client._quic.send_stream_data(client.stream_id, clients_msg, end_stream=False)
-                                client.transmit()
                         potions = msg.split("|")[6]
                         potions = potions.split(";")
 
