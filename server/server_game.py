@@ -1130,6 +1130,8 @@ async def connect_to_lb():
 
                     try:
                         parts = msg.split("|")
+                        if len(parts) < 7:
+                            print("got a shit msg from the lb")
                         border_l = parts[1]
                         border_r = parts[2]
                         if border_l != "None":
@@ -1141,7 +1143,21 @@ async def connect_to_lb():
                         else:
                             state.server_area_right = None
 
-                        weapons = msg.split("|")[3]
+                        neighbor_l = parts[3]
+                        neighbor_r = parts[4]
+
+                        if neighbor_l != "None":
+                            state.neighbor["left"] = neighbor_l
+                        else:
+                            state.neighbor["left"] = None
+
+                        if neighbor_r != "None":
+                            state.neighbor["right"] = neighbor_r
+                        else:
+                            state.neighbor["right"] = None
+
+
+                        weapons = msg.split("|")[5]
                         weapons = weapons.split(";")
 
                         for weapon in weapons:
@@ -1160,7 +1176,7 @@ async def connect_to_lb():
 
                             }
 
-                        potions = msg.split("|")[4]
+                        potions = msg.split("|")[6]
                         potions = potions.split(";")
 
                         for potion in potions:
@@ -1271,6 +1287,14 @@ async def register_with_lb_once(lb_ip: str, timeout: float = 5.0) -> bool:
                         state.server_area_left =  border_l
                     if border_r != "None":
                         state.server_area_right = border_r
+
+                    neighbor_l = parts[3]
+                    neighbor_r = parts[4]
+                    if neighbor_l != "None":
+                        state.neighbor["left"] = neighbor_l
+                    if neighbor_r != "None":
+                        state.neighbor["right"] = neighbor_r
+
                     weapons = parts[5]
                     weapons = weapons.split(";")
 
@@ -1365,6 +1389,7 @@ async def main():
         configuration=config,
         create_protocol=EchoQuicProtocol,
     ))
+    asyncio.create_task(connect_to_lb())
     asyncio.create_task(check_cpu())
     asyncio.create_task(monsters_manager())
     asyncio.create_task(track_server_fps())
