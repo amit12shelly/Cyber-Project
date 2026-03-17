@@ -117,15 +117,15 @@ def init_db():
     # ---------------- Inventory Table ----------------
     # Stores all items owned by a player
     cur.execute("""
-    CREATE TABLE IF NOT EXISTS inventory (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        player_id INTEGER NOT NULL,
-        slot INTEGER NOT NULL CHECK(slot >= 0 AND slot < 5),
-        amount INTEGER DEFAULT 0,
-        FOREIGN KEY(player_id) REFERENCES players(id),
-        UNIQUE(player_id, slot)
-    );
-    """)
+        CREATE TABLE IF NOT EXISTS inventory (
+            player_id INTEGER NOT NULL,
+            slot INTEGER NOT NULL CHECK(slot >= 0 AND slot < 11), 
+            item_type TEXT NOT NULL,    -- למשל: 'AK47', 'Pistol', 'HP_Potion'
+            ammo INTEGER DEFAULT 0,     -- רלוונטי לנשקים, בשיקויים יהיה 0
+            FOREIGN KEY(player_id) REFERENCES players(id),
+            UNIQUE(player_id, slot)     -- מונע כפל פריטים באותו סלוט
+        );
+        """)
 
     conn.commit()
     conn.close()
@@ -227,26 +227,38 @@ def load_player(player_id: int) -> Dict[str, Any]:
     cur = conn.cursor()
 
     cur.execute("SELECT username FROM players WHERE id=?", (player_id,))
-    p = cur.fetchone()
+    player_row = cur.fetchone()
 
     cur.execute("SELECT x, y, hp FROM characters WHERE player_id=?", (player_id,))
-    c = cur.fetchone()
+    char_row = cur.fetchone()
 
-    cur.execute("SELECT slot, amount FROM inventory WHERE player_id=?", (player_id,))
+    cur.execute("SELECT slot, item_type, ammo FROM inventory WHERE player_id=?", (player_id,))
     inv_rows = cur.fetchall()
 
     conn.close()
 
-    if not p or not c:
+    if not player_row or not char_row:
+        print(f"[!] Player {player_id} not found in database.")
         return {}
+
+    inventory_dict = {}
+    for row in inv_rows:
+        slot_id = row[0]
+        item_type = row[1]
+        ammo_count = row[2]
+
+        inventory_dict[slot_id] = {
+            "type": item_type,
+            "ammo": ammo_count
+        }
 
     return {
         "player_id": player_id,
-        "username": p[0],
-        "x": c[0],
-        "y": c[1],
-        "hp": c[2],
-        "inventory": {row[0]: row[1] for row in inv_rows}
+        "username": player_row[0],
+        "x": char_row[0],
+        "y": char_row[1],
+        "hp": char_row[2],
+        "inventory": inventory_dict
     }
 
 
@@ -271,12 +283,11 @@ def save_player(state: Dict[str, Any]):
         (state["x"], state["y"], state["hp"], int(time.time()), state["player_id"])
     )
 
-    # עדכון אינוונטורי (מחיקה וכתיבה מחדש)
     cur.execute("DELETE FROM inventory WHERE player_id=?", (state["player_id"],))
-    for slot, amount in state["inventory"].items():
+    for slot, data in state["inventory"].items():
         cur.execute(
-            "INSERT INTO inventory (player_id, slot, amount) VALUES (?, ?, ?)",
-            (state["player_id"], slot, amount)
+            "INSERT INTO inventory (player_id, slot, item_type, ammo) VALUES (?, ?, ?, ?)",
+            (state["player_id"], slot, data["type"], data["ammo"])
         )
 
     conn.commit()

@@ -32,6 +32,14 @@ async def get_best_gs_from_lb(x, y):
         return None, None
 
 
+def serialize_inventory(inventory):
+    """הופך את המילון למחרוזת בפורמט: slot,type,ammo;slot,type,ammo"""
+    items = []
+    for slot, data in inventory.items():
+        items.append(f"{slot},{data['type']},{data['ammo']}")
+    return ";".join(items) if items else "Empty"
+
+
 def get_ssl_context():
     context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
     try:
@@ -76,11 +84,13 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                         gs_ip, gs_port = await get_best_gs_from_lb(player_data['x'], player_data['y'])
 
                         if gs_ip and gs_port:
+                            inv_str = serialize_inventory(player_data['inventory'])
+
                             reply = (
                                 f"LOGIN_SUCCESS|{player_id}|"
                                 f"{player_data['username']}|{player_data['x']}|"
                                 f"{player_data['y']}|{player_data['hp']}|"
-                                f"{player_data['inventory']}|"
+                                f"{inv_str}|"
                                 f"{gs_ip}|{gs_port}"
                             )
                         else:

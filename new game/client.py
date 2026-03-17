@@ -739,10 +739,43 @@ def main():
         loot_items = []
         poison_effects = []
         monsters = []
-        inventory = []
+        inventory = []  # הרשימה של השיקויים שלך (סלוטים 5-10)
         hp_items = []
         bullets = {}
         server_fps = 0
+
+        # ==========================================
+        # אתחול ציוד ושיקויים מתוך player_data
+        # ==========================================
+        raw_inv = player_data.get("inventory", "Empty")
+        if raw_inv and raw_inv != "Empty":
+            # פירוק המחרוזת לפריטים בודדים
+            items_list = raw_inv.split(";")
+            for item_str in items_list:
+                if not item_str:
+                    continue
+
+                # חילוץ הנתונים מהשרת
+                slot_str, item_type, ammo_str = item_str.split(",")
+                slot = int(slot_str)
+                ammo = int(ammo_str)
+
+                if 0 <= slot <= 4:
+                    img_key = item_type.lower()
+                    if img_key in weapon_images:
+                        new_weapon = Item(player.x, player.y, weapon_images[img_key], "weapon", item_type)
+                        new_weapon.ammo = ammo
+                        player.inventory.append(new_weapon)
+                    else:
+                        print(f"[!] Warning: Unknown weapon '{item_type}' from DB")
+
+                # בדיקה אם זה שיקוי (סלוטים 5-10)
+                elif 5 <= slot <= 10:
+                    if item_type == "Potion":
+                        inventory.append(Potion(player.x, player.y, potion_img, "Potion"))
+                    elif item_type == "Poison":
+                        inventory.append(Potion(player.x, player.y, poison_img, "Poison"))
+        # ==========================================
 
 
         running = True

@@ -209,9 +209,19 @@ async def handle_gs_lifecycle(reader, writer):
                                              if d["x"] == x and d["y"] == y]
                                 for id_del in to_delete: del weapons_manager.state.map_weapons[id_del]
 
+
                         elif cmd_type == "chat":
-                            # כאן אפשר להוסיף לוגיקה להעברת הודעות צ'אט גלובליות אם תרצה
-                            pass
+                            if "," in data:
+                                msg, sender = data.split(",", 1)
+                                chat_broadcast = f"ChatBroadcast|{sender}|{msg}\n"
+                                print(f"[*] Global Chat from {sender}: {msg}")
+                                # הפצה לכל השרתים המחוברים
+                                for s in servers:
+                                    try:
+                                        s.writer.write(chat_broadcast.encode())
+                                        asyncio.create_task(s.writer.drain())
+                                    except Exception as e:
+                                        print(f"[!] Failed to broadcast chat to GS-{s.id}: {e}")
 
                     # אם ה-CPU השתנה משמעותית -> מחלקים מחדש
                     if abs(old_cpu - cpu_load) > 100: #or len(parts) > 3 אם יש שינויים בדברים
