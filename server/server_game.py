@@ -1130,10 +1130,16 @@ async def connect_to_lb():
 
                     try:
                         parts = msg.split("|")
-                        state.server_area = {
-                            "t-l": float(parts[1]),
-                            "t-r": float(parts[2])
-                        }
+                        border_l = parts[1]
+                        border_r = parts[2]
+                        if border_l != "None":
+                            state.server_area_left = border_l
+                        else:
+                            state.server_area_left = None
+                        if border_r != "None":
+                            state.server_area_right = border_r
+                        else:
+                            state.server_area_right = None
 
                         weapons = msg.split("|")[3]
                         weapons = weapons.split(";")
@@ -1175,25 +1181,6 @@ async def connect_to_lb():
                     except Exception as e:
                         print("[LB] Failed parsing UpdateArea:", e)
 
-                elif msg.startswith("GET-WEAPON"):
-                    try:
-                        parts = msg.split("|")[1:]
-                        for weapons in parts:
-                            x_str = weapons.split(",")[0]
-                            y_str = weapons.split(",")[0]
-                            w_type = weapons.split(",")[0]
-                            new_id = random.randint(1, 1000000)
-                            while new_id in state.map_weapons:
-                                new_id = random.randint(1, 1000000)
-
-                            state.map_weapons[new_id] = {
-                                "x": float(x_str),
-                                "y": float(y_str),
-                                "type": w_type,
-                            }
-                    except:
-                        print("Error while getting weapons from lb")
-
                 elif msg.startswith("GET-MONSTER"):
                     try:
                         parts = msg.split("|")[1:]
@@ -1206,26 +1193,6 @@ async def connect_to_lb():
                     except:
                         print("Error while getting monsters from lb")
 
-
-
-                elif msg.startswith("GET-POTION"):
-                    try:
-                        parts = msg.split("|")[1:]
-                        for potions in parts:
-                            x_str = potions.split(",")[0]
-                            y_str = potions.split(",")[0]
-                            w_type = potions.split(",")[0]
-                            new_id = random.randint(1, 1000000)
-                            while new_id in state.map_potion:
-                                new_id = random.randint(1, 1000000)
-
-                            state.map_weapons[new_id] = {
-                                "x": float(x_str),
-                                "y": float(y_str),
-                                "type": w_type,
-                            }
-                    except:
-                        print("Error while getting potion from lb")
 
 
 
@@ -1295,11 +1262,16 @@ async def register_with_lb_once(lb_ip: str, timeout: float = 5.0) -> bool:
             elif msg.startswith("UpdateStats|"):
                 try:
                     parts = msg.split("|")
-                    state.server_area = {
-                        "t-l": float(parts[1]),
-                        "t-r": float(parts[2])
-                    }
-                    weapons = msg.split("|")[3]
+                    if len(parts) < 5:
+                        print(f"wrong msg from lb - only {len(parts)} parts")
+                    border_l = parts[1]
+                    border_r = parts[2]
+                    if border_l != "None":
+                        state.server_area_left =  border_l
+                    if border_r != "None":
+                        state.server_area_right = border_r
+
+                    weapons = parts[3]
                     weapons = weapons.split(";")
                     for weapon in weapons:
                         x_str = weapon.split(",")[0]
