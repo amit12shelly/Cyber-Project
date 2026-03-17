@@ -8,6 +8,8 @@ from queue import Queue
 from aioquic.asyncio import connect
 from aioquic.quic.configuration import QuicConfiguration
 
+from server.server_game import SKILL_COOL_TIME
+
 SERVER_IP = "127.0.0.1"
 SERVER_PORT = 4433
 TOLERANCE = 5
@@ -329,9 +331,17 @@ class Monster:
                 current_hp_width = min(self.hp, bar_width)
                 pygame.draw.rect(screen, (0, 255, 0), (bar_x, bar_y, current_hp_width, bar_height))
 
-# ---------------- Player CLASS ---------------- #
+#----------------- SKILL CLASS  ---------------#
+class Skill:
+    def __init__(self, name, duration_time, last_action_time, is_active):
+        self.name = name
+        self.duration_time = duration_time
+        self.last_action_time = last_action_time
+        self.is_active = is_active
+
+# ---------------- PLAYER CLASS ---------------- #
 class Player:
-    def __init__(self, x, y):
+    def __init__(self, x, y, skill):
         self.x = x
         self.y = y
         self.hp = 100
@@ -350,7 +360,6 @@ class Player:
         right_1 = pygame.transform.scale(pygame.image.load("img/right_2.png"), (64, 64))
         left_0  = pygame.transform.flip(right_0, True, False)
         left_1  = pygame.transform.flip(right_1, True, False)
-
         self.base_sprites = {
             "up":    [
                 pygame.transform.scale(pygame.image.load("img/upSprite.png"), (64, 64)),
@@ -398,7 +407,7 @@ class Player:
         else:
             self.anim_frame = 0
             self.anim_timer = 0
-
+        self.skill = skill
     def pick_item(self, item):
         self.inventory.append(item)
         print(f"Picked up {item.name}")
@@ -421,30 +430,31 @@ class Player:
             return weapon
         return None
 
-    def move(self, keys, game_map, tile_size):
+    def move(self, keys, game_map, tile_size, skill):
         moved = False
-
+        current_speed = self.speed * (2 if skill.name == "Speed Boost" and skill.is_active == True else 1)
+        # --- Manual movement ---
         if keys[pygame.K_w]:
-            if not collides_with_wall(game_map, self.x, self.y - self.speed, self.size, tile_size):
-                self.y -= self.speed
+            if not collides_with_wall(game_map, self.x, self.y - current_speed, self.size, tile_size):
+                self.y -= current_speed
             self.direction = "up"
             moved = True
 
         if keys[pygame.K_s]:
-            if not collides_with_wall(game_map, self.x, self.y + self.speed, self.size, tile_size):
-                self.y += self.speed
+            if not collides_with_wall(game_map, self.x, self.y + current_speed, self.size, tile_size):
+                self.y += current_speed
             self.direction = "down"
             moved = True
 
         if keys[pygame.K_a]:
-            if not collides_with_wall(game_map, self.x - self.speed, self.y, self.size, tile_size):
-                self.x -= self.speed
+            if not collides_with_wall(game_map, self.x - current_speed, self.y, self.size, tile_size):
+                self.x -= current_speed
             self.direction = "left"
             moved = True
 
         if keys[pygame.K_d]:
-            if not collides_with_wall(game_map, self.x + self.speed, self.y, self.size, tile_size):
-                self.x += self.speed
+            if not collides_with_wall(game_map, self.x + current_speed, self.y, self.size, tile_size):
+                self.x += current_speed
             self.direction = "right"
             moved = True
 
@@ -469,30 +479,39 @@ class Player:
         self.is_moving = moved
         self._update_animation()
 
-    def draw(self, screen, camera_x, camera_y):
+    def draw(self, screen, camera_x, camera_y, active_skills):
         if self.has_weapon_equipped():
             sprite = self.weapon_sprites[self.direction][self.anim_frame]
         else:
             sprite = self.base_sprites[self.direction][self.anim_frame]
 
         screen.blit(sprite, (self.x - camera_x, self.y - camera_y))
+        try:
+            if active_skills[MY_ID].name == "Shield":
+                shield_center = (self.x - camera_x + 32, self.y - camera_y + 32)  # +32 to center on 64x64 sprite
+                pygame.draw.circle(screen, (78, 149, 217), shield_center, 40, 2)
+        except:
+            pass
+        # --- HEALTH BAR ---
+        hp_bar_width = 100
+        hp_bar_height = 5
+        hp_bar_x = self.x - camera_x + (self.size // 2) - (hp_bar_width // 2)
+        hp_bar_y = self.y - camera_y - 10  # 10px above the player
 
-        bar_width = 100
-        bar_height = 5
-        bar_x = self.x - camera_x + (self.size // 2) - (bar_width // 2)
-        bar_y = self.y - camera_y - 10
-        for i in range(bar_width):
+        for i in range(hp_bar_width):
             color = (0, 255, 0) if i < self.hp else (255, 0, 0)
-            pygame.draw.line(screen, color, (bar_x + i, bar_y), (bar_x + i, bar_y + bar_height))
+            pygame.draw.line(screen, color, (hp_bar_x + i, hp_bar_y), (hp_bar_x + i, hp_bar_y + hp_bar_height))
+
 
 
 class RemotePlayer:
-    def __init__(self, x, y, hp, sprites):
+    def __init__(self, x, y, hp, sprites, id):
         self.x = x
         self.y = y
         self.hp = hp
         self.old_x = x
         self.old_y = y
+        self.id = id
         self.direction = "down"
         self.sprites = sprites
         self.size = 64
@@ -510,8 +529,13 @@ class RemotePlayer:
         else:
             self.direction = "down" if dy > 0 else "up"
 
-    def draw(self, screen, camera_x, camera_y):
-        screen.blit(self.sprites[self.direction][0], (self.x - camera_x, self.y - camera_y))
+    def draw(self, screen, camera_x, camera_y, active_skills):
+        screen.blit(self.sprites[self.direction][0], (self.x - camera_x, self.y - camera_y))try:
+            if active_skills[self.id].name == "Shield":
+                shield_center = (self.x - camera_x + 32, self.y - camera_y + 32)  # +32 to center on 64x64 sprite
+                pygame.draw.circle(screen, (78, 149, 217), shield_center, 40, 3)
+        except:
+            pass
         bar_width = 100
         bar_height = 5
         bar_x = self.x - camera_x + (self.size // 2) - (bar_width // 2)
@@ -593,11 +617,54 @@ def draw_bullet(screen, bullet_img, x, y, angle, camera_x, camera_y):
 def get_next_bullet_position(x, y, angle_degrees):
     angle_rad = math.radians(angle_degrees)
     return x + math.cos(angle_rad) * 15, y + math.sin(angle_rad) * 15
+def draw_icons(screen, icons_lst, skill):
+    current_time = pygame.time.get_ticks() / 1000
+
+    elapsed = current_time - skill.last_action_time - (skill.duration_time if skill.is_active else 0)
+
+    total_wait_required = (skill.duration_time if skill.last_action_time != 0 else 0) + SKILL_COOL_TIME
+
+    padding_x = 8
+    padding_y = 10
+    x = screen.get_width() - padding_x*2
+    y = screen.get_height() - padding_y
+    icons_dict = {"Shield": 0, "Speed Boost": 1, "Bombs": 2}
+    for i in range(len(icons_lst)):
+        if(skill.is_active and icons_dict[skill.name] == i and skill.last_action_time != 0) or (elapsed >= total_wait_required):
+            icons_lst[i].set_alpha(255)
+        else:
+            icons_lst[i].set_alpha(128)
+
+        x -= icons_lst[i].get_width()
+        screen.blit(icons_lst[i], (x, y - icons_lst[i].get_height()))
+        x -= padding_x
+
+    skill_bar_width = 2*(padding_x) + 3*(icons_lst[0].get_width())
+    skill_bar_height = 5
+
+    skill_bar_x = x + padding_x
+    skill_bar_y = y - icons_lst[0].get_height() - padding_y -4  # 5px above the player
+
+    if skill.is_active:
+        skill_percent = round(
+            (1 - (current_time - skill.last_action_time) / skill.duration_time) * skill_bar_width)
+    else:
+        if (skill.last_action_time == 0):
+            skill_percent = round((current_time / SKILL_COOL_TIME) * skill_bar_width)
+        else:
+            skill_percent = round(((current_time - skill.last_action_time - skill.duration_time) / SKILL_COOL_TIME) * skill_bar_width)
+
+    for i in range(skill_bar_width):
+        color = (78, 149, 217) if i < skill_percent else (255, 255, 255)
+        pygame.draw.line(screen, color, (skill_bar_x + i, skill_bar_y),
+                         (skill_bar_x + i, skill_bar_y + skill_bar_height))
 
 # ---------------- MAIN GAME LOOP ---------------- #
 
 def main():
     global MY_ID
+    global SKILL_COOL_TIME
+    SKILL_COOL_TIME = 12
     pygame.init()
     screen = pygame.display.set_mode((1280, 720))
     pygame.display.set_caption("Game")
@@ -606,7 +673,11 @@ def main():
     tile_size = 64
     floor_img = pygame.image.load("img/DesertTile.png").convert()
     wall_img = pygame.image.load("img/watertile.png").convert()
+    bomb_img = pygame.image.load("img/bomb.png").convert_alpha()
     bullet_img = pygame.image.load("img/bullet.png").convert_alpha()
+    bomb_icon = pygame.image.load("img/bomb_icon.png").convert_alpha()
+    speed_boost_icon = pygame.image.load("img/speed_boost_icon.png").convert_alpha()
+    shield_icon = pygame.image.load("img/shield_icon.png").convert_alpha()
 
     inventory_open = False
     ui_font = pygame.font.SysFont("arial", 22)
@@ -614,14 +685,26 @@ def main():
     floor_img = pygame.transform.scale(floor_img, (tile_size, tile_size))
     wall_img = pygame.transform.scale(wall_img, (tile_size, tile_size))
     bullet_img = pygame.transform.scale(bullet_img, (21, 11))
+    bomb_img = pygame.transform.scale(bomb_img, (40, 40))
+    bomb_icon = pygame.transform.smoothscale(bomb_icon, (64, 70))
+    speed_boost_icon = pygame.transform.smoothscale(speed_boost_icon, (64, 70))
+    shield_icon = pygame.transform.smoothscale(shield_icon, (64, 70))
     game_map = load_map("map.txt")
 
-    player = Player(128, 128)
+    skills_dict = {
+        "Speed Boost": Skill("Speed Boost", 10, 0, False),
+        "Shield": Skill("Shield", 6, 0, False),
+        "Bombs": Skill("Bombs", 7, 0, False)
+    }
+    skill = skills_dict["Shield"]
+    player = Player(128, 128, skill)
     chat_font = pygame.font.SysFont("monospace", CHAT_FONT_SIZE)
     chat_open = False
     chat_input = ""
     chat_messages = []
     start_quic_thread()
+
+
     outgoing_messages.put(f"Connected|{player.x},{player.y}|{player.hp}")
     outgoing_messages.put(f"UPDATE|{player.x},{player.y}")
 
@@ -633,8 +716,11 @@ def main():
     monster_img = pygame.transform.scale(pygame.image.load("img/monster_down.png").convert_alpha(), (45, 45))
     potion_img  = pygame.transform.scale(pygame.image.load("img/hp_Potion.png").convert_alpha(), (40, 40))
     poison_img  = pygame.transform.scale(pygame.image.load("img/poison_item.png").convert_alpha(), (40, 40))
-
     remote_players = {}
+    active_skills = {}
+    # Loot pool (מאגר פריטים)
+
+    # loot_items = spawn_loot_per_camera_zone(game_map, tile_size, loot_pool, screen.get_width(), screen.get_height(),per_zone=1)
     loot_items = []
     poison_effects = []
     monsters = []
@@ -642,6 +728,7 @@ def main():
     hp_items = []
     bullets = {}
     server_fps = 0
+
 
     running = True
     while running:
@@ -704,6 +791,28 @@ def main():
                         elif item.name == "Poison":
                             outgoing_messages.put(f"USE|{item.name}|{player.x + 32},{player.y + 32}")
 
+                if event.key == pygame.K_z or event.key == pygame.K_x or event.key == pygame.K_c:
+                    current_time = pygame.time.get_ticks() / 1000
+
+                    elapsed = current_time - skill.last_action_time - (skill.duration_time if skill.is_active else 0)
+
+                    if skill.is_active and elapsed < skill.duration_time:
+                        print(f"Skill is already active! Ends in {skill.duration_time - elapsed:.1f}s")
+
+                    total_wait_required = (skill.duration_time if skill.last_action_time != 0 else 0) + SKILL_COOL_TIME
+
+                    if elapsed >= total_wait_required:
+                        skill = skills_dict["Speed Boost"] if event.key == pygame.K_x else skills_dict["Shield"] if event.key == pygame.K_c else skills_dict["Bombs"]
+                        skill.last_action_time = current_time
+                        skill.is_active = True
+                        player.skill = skill
+                        print("Skill Active!")
+                        active_skills[MY_ID] = skill
+                        outgoing_messages.put(f"SKILL|{skill.name}|{current_time}")
+                    else:
+                        remaining = total_wait_required - elapsed
+                        print(f"Skill on cooldown. Wait {remaining:.1f}s")
+
                 if event.key == pygame.K_q:
                     slot_to_drop = player.selected_slot
                     gun = player.drop_selected_weapon()
@@ -745,7 +854,7 @@ def main():
 
         if not chat_open:
             keys = pygame.key.get_pressed()
-            player.move(keys, game_map, tile_size)
+            player.move(keys, game_map, tile_size, skill)
 
         while not incoming_messages.empty():
             msg = incoming_messages.get()
@@ -764,7 +873,7 @@ def main():
                     player.hp = hp
                 else:
                     if player_id not in remote_players:
-                        remote_players[player_id] = RemotePlayer(x, y, hp, player.base_sprites)
+                        remote_players[player_id] = RemotePlayer(x, y, hp, player.base_sprites, player_id)
                         outgoing_messages.put(f"UPDATE|{player.x},{player.y}")
                     else:
                         remote_players[player_id].update_from_server(x, y, hp)
@@ -782,11 +891,11 @@ def main():
                         pygame.quit(); exit()
 
             elif parts[0] == "SHOW-BULLET":
-                if len(parts) < 4:
+                if len(parts) < 5:
                     continue
                 bullet_x = parts[1].split(',')[0]
                 bullet_y = parts[1].split(',')[1]
-                bullets[parts[3]] = {"x": bullet_x, "y": bullet_y, "angle": parts[2]}
+                bullets[parts[3]] = {"x": bullet_x, "y": bullet_y, "angle": parts[2], "type": parts[4]}
 
             elif parts[0] == "DEL-BULLET":
                 if len(parts) < 2:
@@ -886,6 +995,16 @@ def main():
                 elif parts[2] == "Poison":
                     hp_items.append(Potion(x_potion, y_potion, poison_img, "Poison"))
 
+                    hp_items.append(Potion(x_potion,y_potion,potion_img))
+            elif parts[0] == "SKILL":
+                player_id = parts[1]
+                player_skill = parts[2]
+                is_active = parts[3]
+                if is_active == "True":
+                    active_skills[player_id] = skills_dict[player_skill]
+                else:
+                    del active_skills[player_id]
+                print(active_skills)
             elif parts[0] == "POISON":
                 pos = parts[1]
                 x, y = map(float, pos.split(","))
@@ -913,11 +1032,9 @@ def main():
             item.update()
             item.draw(screen, camera_x, camera_y)
 
-        player.draw(screen, camera_x, camera_y)
-
+        player.draw(screen, camera_x, camera_y, active_skills)
         for rp in remote_players.values():
-            rp.draw(screen, camera_x, camera_y)
-
+            rp.draw(screen, camera_x, camera_y, active_skills)
         for monster in monsters:
             if (camera_x - 100 <= monster.x <= camera_x + screen.get_width() + 100 and
                     camera_y - 100 <= monster.y <= camera_y + screen.get_height() + 100):
@@ -936,14 +1053,26 @@ def main():
             bullet_x     = float(bullets[i]["x"])
             bullet_y     = float(bullets[i]["y"])
             bullet_angle = float(bullets[i]["angle"])
-            draw_bullet(screen, bullet_img, bullet_x, bullet_y, bullet_angle, camera_x, camera_y)
+            bullet_type = str(bullets[i]["type"])
+            draw_bullet(screen, bullet_img if bullet_type == "bullet" else bomb_img, bullet_x, bullet_y, bullet_angle, camera_x, camera_y)
             new_x, new_y = get_next_bullet_position(bullet_x, bullet_y, bullet_angle)
             bullets[i]["x"] = new_x
             bullets[i]["y"] = new_y
 
+            #if on player/outside the map/on water:
+            #del bullets[i]
+
+        current_time = pygame.time.get_ticks() / 1000
+        if skill.is_active:
+            if current_time - skill.last_action_time >= skill.duration_time:
+                skill.is_active = False
+                player.skill = skill
+                del active_skills[MY_ID]
+                print("Skill duration finished! (Speed boost ended)")
         draw_fps(screen, clock, chat_font, server_fps)
         draw_inventory(screen, player, chat_font)
         draw_chat(screen, chat_font, chat_messages, chat_open, chat_input)
+        draw_icons(screen, [shield_icon, speed_boost_icon, bomb_icon], skill)
         draw_potion_slot(screen, inventory)
         if inventory_open:
             draw_big_inventory(screen, player, inventory, ui_font)
