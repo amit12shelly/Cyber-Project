@@ -65,6 +65,7 @@ class GameState:
     active_bullets = {}  # bullet_id -> {x, y, angle}
     players_skills = {}  #client_id -> {skill name, is active, last activation time}
     players_potions = {}
+    players_control = {} #client_id -> True-this server control this client/False - the opposite
 
     #lb info
     neighbor = {}  # left -> x,ip,port /right -> x,ip,port
@@ -1268,10 +1269,6 @@ async def connect_to_lb():
             state.lb_writer = writer
 
             connect_msg = f"Server connect|{MY_IP}|{psutil.cpu_percent()}|{MY_PORT}\n"
-            to_send = state.pending_lb_updates
-            for report in to_send:
-                connect_msg += "|" + report
-                state.pending_lb_updates.remove(report)
 
             writer.write(connect_msg.encode())
             await writer.drain()
@@ -1530,6 +1527,10 @@ async def send_heartbeats_to_lb(writer):
         while True:
             if state.server_id is not None:
                 msg = f"Server heartbeat|{state.server_id}|{psutil.cpu_percent()}\n"
+                to_send = state.pending_lb_updates
+                for report in to_send:
+                    msg += "|" + report
+                    state.pending_lb_updates.remove(report)
                 writer.write(msg.encode())
                 await writer.drain()
 
