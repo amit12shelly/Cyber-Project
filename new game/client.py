@@ -950,8 +950,7 @@ def main():
                 bullet_angle = float(bullets[i]["angle"])
 
                 bullet_type = str(bullets[i]["type"])
-                draw_bullet(screen, bullet_img if bullet_type == "bullet" else bomb_img if bullets[i] == "bomb" else weapon_images["knife"], bullet_x, bullet_y,
-                            bullet_angle, camera_x, camera_y)
+                draw_bullet(screen, bullet_img if bullet_type == "bullet" else bomb_img if bullet_type == "bomb" else weapon_images["knife"], bullet_x, bullet_y, bullet_angle, camera_x, camera_y)
 
                 new_x, new_y = get_next_bullet_position(bullet_x, bullet_y, bullet_angle, 15 if bullet_type == "bullet" else 4)
                 bullets[i]["x"] = new_x
