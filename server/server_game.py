@@ -198,6 +198,19 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             if check_movement(new_pos, state.players_pos[client_id], state.players_skills[self._quic.host_cid.hex()]):
                 state.players_pos[client_id] = new_pos
                 self.broadcast_player(client_id, new_pos, state.players_hp[client_id], False)
+                new_x = new_pos.split(",")[0]
+                if new_x < state.server_area_left:
+                    msg = f"SWITCHED|{state.neighbor["left"].split(",")[0]}|{state.neighbor["left"].split(",")[1]}\n".encode()
+                    self._quic.send_stream_data(self.stream_id, msg, end_stream=False)
+                    self.transmit()
+                    self.broadcast_remove(client_id)
+                    self.disconnect()
+                if new_x > state.server_area_right:
+                    msg = f"SWITCHED|{state.neighbor["right"].split(",")[0]}|{state.neighbor["right"].split(",")[1]}\n".encode()
+                    self._quic.send_stream_data(self.stream_id, msg, end_stream=False)
+                    self.transmit()
+                    self.broadcast_remove(client_id)
+                    self.disconnect()
             else:
                 self.disconnect()
                 print("player has been kicked! movement problem")
@@ -1160,6 +1173,16 @@ async def connect_to_lb():
                         weapons = msg.split("|")[5]
                         weapons = weapons.split(";")
 
+                        for old_weapon in state.map_weapons:
+                            pos_str = f"{state.map_weapons[old_weapon]['x']},{state.map_weapons[old_weapon]['y']}"
+                            type_str = state.map_weapons[old_weapon]["type"]
+                            clients_msg = f"UNDROPPED|{pos_str}|{type_str}\n".encode("utf-8")
+                            for client in list(state.active_clients):
+                                if client.stream_id is None:
+                                    continue
+                                client._quic.send_stream_data(client.stream_id, clients_msg, end_stream=False)
+                                client.transmit()
+
                         for weapon in weapons:
                             x_str = weapon.split(",")[0]
                             y_str = weapon.split(",")[1]
@@ -1175,9 +1198,25 @@ async def connect_to_lb():
                                 "type": w_str,
 
                             }
-
+                            clients_msg = f"UNDROPPED|{x_str},{y_str}|{w_str}\n".encode("utf-8")
+                            for client in list(state.active_clients):
+                                if client.stream_id is None:
+                                    continue
+                                client._quic.send_stream_data(client.stream_id, clients_msg, end_stream=False)
+                                client.transmit()
                         potions = msg.split("|")[6]
                         potions = potions.split(";")
+
+                        for old_potion in state.map_potion:
+                            pos_str = f"{state.map_potion[old_potion]['x']},{state.map_potion[old_potion]['y']}"
+                            type_str = state.map_potion[old_potion]["type"]
+                            msg = f"DROPPED|{pos_str}|{type_str}\n".encode("utf-8")
+                            for client in list(state.active_clients):
+                                if client.stream_id is None:
+                                    continue
+                                client._quic.send_stream_data(client.stream_id, msg, end_stream=False)
+                                client.transmit()
+
 
                         for potion in potions:
                             x_str = potion.split(",")[0]
@@ -1193,6 +1232,12 @@ async def connect_to_lb():
                                 "y": float(y_str),
                                 "type": p_type,
                             }
+                            msg = f"DROPPED|{x_str},{y_str}|{p_type}\n".encode("utf-8")
+                            for client in list(state.active_clients):
+                                if client.stream_id is None:
+                                    continue
+                                client._quic.send_stream_data(client.stream_id, msg, end_stream=False)
+                                client.transmit()
 
                     except Exception as e:
                         print("[LB] Failed parsing UpdateArea:", e)
@@ -1292,8 +1337,13 @@ async def register_with_lb_once(lb_ip: str, timeout: float = 5.0) -> bool:
                     neighbor_r = parts[4]
                     if neighbor_l != "None":
                         state.neighbor["left"] = neighbor_l
+                    else:
+                        state.neighbor["left"] = None
+
                     if neighbor_r != "None":
                         state.neighbor["right"] = neighbor_r
+                    else:
+                        state.neighbor["right"] = None
 
                     weapons = parts[5]
                     weapons = weapons.split(";")
