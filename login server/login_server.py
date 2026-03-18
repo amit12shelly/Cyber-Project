@@ -160,46 +160,74 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                     success = database.register(username, password)
                     reply = "Registration Success" if success else "Username Exists"
 
+
                 elif request_type == "LOGIN":
+
                     real_id = database.login(username, password)
+
                     if real_id is not None:
+
                         player_data = database.load_player(real_id)
 
-                        # הפרדה: נשקים (0-4) ושיקויים (5-10)
+                        # שליפת כל התיק
+
                         full_inventory = player_data['inventory']
+
+                        # הפרדה: נשקים (0-4) ושיקויים (5-10) לטובת ה-LB
+
                         weapons_only = {k: v for k, v in full_inventory.items() if k <= 4}
+
                         potions_only = [v['type'] for k, v in full_inventory.items() if k >= 5]
 
-                        inv_str = serialize_inventory(weapons_only)
+                        # כאן התיקון: אנחנו מכינים סטרינג מלא לקליינט, וסטרינג חלקי ל-LB
+
+                        inv_str_full = serialize_inventory(full_inventory)
+
+                        inv_str_lb = serialize_inventory(weapons_only)
+
                         potions_str = ",".join(potions_only) if potions_only else "None"
 
                         fake_id = secrets.token_hex(16)
 
-                        # שליחה ל-LB עם הפרמטר החדש
+                        # שליחה ל-LB (שולחים מופרד)
+
                         gs_ip, gs_port = await register_player_on_lb(
+
                             real_id, fake_id, player_data['username'],
+
                             player_data['x'], player_data['y'], player_data['hp'],
-                            inv_str, potions_str  # <--- הוספת potions_str
+
+                            inv_str_lb, potions_str
+
                         )
 
                         if gs_ip and gs_port:
-                            if gs_ip and gs_port:
-                                reply = (
-                                    f"LOGIN_SUCCESS|{fake_id}|"
-                                    f"{player_data['username']}|{player_data['x']}|"
-                                    f"{player_data['y']}|{player_data['hp']}|"
-                                    f"{inv_str}|"
-                                    f"{gs_ip}|{gs_port}"
-                                )
+
+                            # תשובה לקליינט - שולחים את התיק המלא!
+
+                            reply = (
+
+                                f"LOGIN_SUCCESS|{fake_id}|"
+
+                                f"{player_data['username']}|{player_data['x']}|"
+
+                                f"{player_data['y']}|{player_data['hp']}|"
+
+                                f"{inv_str_full}|"
+
+                                f"{gs_ip}|{gs_port}"
+
+                            )
+
                         else:
+
                             reply = "Login Failed: No Game Server available"
 
 
-                    else:
-                        reply = "Login Failed"
 
-                else:
-                    reply = "Error: Unknown Request"
+                    else:
+
+                        reply = "Login Failed"
             else:
                 reply = "Error: Invalid Format"
         else:

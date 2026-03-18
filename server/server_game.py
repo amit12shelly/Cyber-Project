@@ -128,7 +128,6 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 self.disconnect()
                 return
 
-            # שינינו ל-7 כדי להכיל את הפושנים
             if len(parts) >= 7:
                 sent_id = parts[1]
                 client_name = parts[2]
@@ -152,11 +151,10 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                     else:
                         c_inv_dict[i] = {"type": "none", "ammo": 0}
 
-                # 1.5 בונים את רשימת הפושנים שהקליינט טוען שיש לו
+                # 1.5 בונים את רשימת הפושנים שהקליינט טוען שיש לו בצורה מאובטחת
                 c_potions_str = parts[6]
-                c_potions = []
-                if c_potions_str and c_potions_str not in ("None", "Empty"):
-                    c_potions = c_potions_str.split(",")
+                c_potions = [p.strip() for p in c_potions_str.split(",") if
+                             p.strip() and p.strip().lower() not in ("none", "empty", "[]")]
 
                 # 2. שלב האבטחה (Validation) מול הנתונים מה-LB
                 if sent_id in state.expected_players:
@@ -166,32 +164,34 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                     e_y = expected_data["y"]
                     e_hp = expected_data["hp"]
                     e_inv = expected_data["inv"]
-                    e_potions = expected_data["potions"]
 
-                    # מיקום
+                    e_potions = expected_data.get("potions", [])
+                    e_potions = [p.strip() for p in e_potions if
+                                 p.strip() and p.strip().lower() not in ("none", "empty", "[]")]
+
+                    # בדיקות אבטחה - מיקום נשאר קריטי
                     if abs(c_x - e_x) > 10 or abs(c_y - e_y) > 10:
-                        print(f"Cheat detected! Position mismatch. Client: {c_x},{c_y}. Expected: {e_x},{e_y}")
+                        print(f"[!] DISCONNECT REASON: Position mismatch. Client: {c_x},{c_y} | Expected: {e_x},{e_y}")
                         self.disconnect()
                         return
 
-                    # חיים
+                    # אם יש חוסר התאמה בחיים - השרת קובע
                     if c_hp != e_hp:
-                        print(f"Cheat detected! HP mismatch. Client: {c_hp}. Expected: {e_hp}")
-                        self.disconnect()
-                        return
+                        print(f"[-] Warning: HP mismatch. Overriding client ({c_hp}) with server ({e_hp}).")
+                        c_hp = e_hp
 
-                    # אינוונטרי
+                    # אם יש חוסר התאמה באינוונטרי - השרת קובע
                     for i in range(INVENTORY_SIZE):
                         if c_inv_dict[i]["type"] != e_inv[i]["type"] or c_inv_dict[i]["ammo"] != e_inv[i]["ammo"]:
-                            print(f"Cheat detected! Inventory mismatch at slot {i}.")
-                            self.disconnect()
-                            return
+                            print(f"[-] Warning: Inventory mismatch. Overriding with server data.")
+                            c_inv_dict = e_inv
+                            break
 
-                    # פושנים - בודקים שיש להם את אותם פושנים בדיוק
+                    # אם יש חוסר התאמה בשיקויים - השרת קובע
                     if sorted(c_potions) != sorted(e_potions):
-                        print("Cheat detected! Potions mismatch.")
-                        self.disconnect()
-                        return
+                        print(f"[-] Warning: Potions mismatch. Client: {c_potions} | Expected: {e_potions}")
+                        print("    -> Overriding client potions with server data.")
+                        c_potions = e_potions
 
                     print(f"Player {client_name} passed security validation successfully!")
 
@@ -200,32 +200,39 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                     del state.expected_players[sent_id]
 
                 else:
+                    print(f"[!] DISCONNECT REASON: Fake ID '{sent_id}' not found in state.expected_players!")
+                    self.disconnect()
                     return
 
                 # --- אתחול הנתונים ---
-                x_str = pos_str.split(",")[0]
-                if float(x_str) < (float(state.server_area_right) + float(SCREEN_WIDTH) / 2):
-                    if float(x_str) > (float(state.server_area_left) - float(SCREEN_WIDTH) / 2):
-                        state.players_pos[client_id] = pos_str
-                        state.players_hp[client_id] = c_hp
-                        state.players_inventory[client_id] = c_inv_dict
-                        state.player_name[client_id] = client_name
-                        state.players_control[client_id] = True
+                valid_right = True
+                if state.server_area_right is not None:
+                    valid_right = c_x < (float(state.server_area_right) + float(SCREEN_WIDTH) / 2)
 
-                        # מכניסים את הפושנים האמיתיים שעברו ולידציה!
-                        state.players_potions[client_id] = c_potions
+                valid_left = True
+                if state.server_area_left is not None:
+                    valid_left = c_x > (float(state.server_area_left) - float(SCREEN_WIDTH) / 2)
 
-                        state.players_skills[client_id] = Skill("Speed Boost", 5, 0, False)
-                    else:
-                        return
+                if valid_right and valid_left:
+                    state.players_pos[client_id] = pos_str
+                    state.players_hp[client_id] = c_hp
+                    state.players_inventory[client_id] = c_inv_dict
+                    state.player_name[client_id] = client_name
+                    state.players_control[client_id] = True
+                    state.players_potions[client_id] = c_potions
+                    state.players_skills[client_id] = Skill("Speed Boost", 5, 0, False)
                 else:
+                    print(f"Player {client_name} is out of server bounds, disconnecting.")
+                    self.disconnect()
                     return
 
             else:
                 print("Cheat/Error detected: Missing arguments in Connected command!")
                 self.disconnect()
                 return
+
             print("player connected!")
+
             # --- המשך ההתחברות והשליחה למשתמשים האחרים ---
             id_msg = f"SETID|{client_id}\n".encode()
             if self.stream_id is not None:
@@ -841,6 +848,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             potions_str = ",".join(potions_list) if potions_list else "None"
 
             # הופכים את המילון של התיק למחרוזת בפורמט שביקשת
+            # הופכים את המילון של התיק למחרוזת בפורמט שה-LB מצפה לו: type,ammo (ללא מספר סלוט!)
             inv_items = []
             for i in range(INVENTORY_SIZE):
                 if i in inv:
@@ -1555,6 +1563,7 @@ async def connect_to_lb():
                         print("[LB] Failed parsing UpdateArea:", e)
 
 
+
                 elif msg.startswith("ExpectPlayer"):
 
                     try:
@@ -1563,9 +1572,7 @@ async def connect_to_lb():
 
                         parts = [p.strip() for p in msg.split("|")]
 
-                        # שים לב: שינינו ל-9 כי עכשיו יש גם פושנים בסוף
-
-                        if len(parts) >= 9:
+                        if len(parts) >= 8:
 
                             p_id = parts[1]
 
@@ -1581,13 +1588,15 @@ async def connect_to_lb():
 
                             pinv_str = parts[7]
 
-                            potions_str = parts[8]  # <-- הנתון החדש מה-LB
+                            # אם ה-LB שלח פושנים ניקח אותם, אחרת נניח "None"
+
+                            potions_str = parts[8] if len(parts) >= 9 else "None"
 
                             # 1. אינוונטרי
 
                             inv_dict = {int(i): {"type": "none", "ammo": 0} for i in range(INVENTORY_SIZE)}
 
-                            if pinv_str and pinv_str not in ("None", "Empty"):
+                            if pinv_str and pinv_str.lower() not in ("none", "empty"):
 
                                 items_list = pinv_str.split(";")
 
@@ -1609,12 +1618,10 @@ async def connect_to_lb():
 
                                         pass
 
-                            # 2. חילוץ הפושנים
+                            # 2. חילוץ הפושנים בצורה בטוחה שמתעלמת מרווחים
 
-                            expected_potions = []
-
-                            if potions_str and potions_str not in ("None", "Empty"):
-                                expected_potions = potions_str.split(",")
+                            expected_potions = [p.strip() for p in potions_str.split(",") if
+                                                p.strip() and p.strip().lower() not in ("none", "empty", "[]")]
 
                             # 3. שומרים הכל במילון
 
@@ -1630,7 +1637,7 @@ async def connect_to_lb():
 
                                 "inv": inv_dict,
 
-                                "potions": expected_potions  # <-- שומרים את הפושנים לולידציה
+                                "potions": expected_potions
 
                             }
 

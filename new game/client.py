@@ -764,13 +764,21 @@ def main():
         # ==========================================
         # אתחול ציוד ושיקויים מתוך player_data
         # ==========================================
+        # ==========================================
+        # אתחול ציוד ושיקויים מתוך player_data
+        # ==========================================
+        # ==========================================
+        # אתחול ציוד ושיקויים מתוך player_data
+        # ==========================================
         if raw_inv and raw_inv != "Empty":
             items_list = raw_inv.split(";")
+
+            temp_weapons = {}  # שומרים זמנית כדי לסדר לפי הסלוט
+
             for item_str in items_list:
                 if not item_str:
                     continue
 
-                # חילוץ הנתונים מהשרת
                 slot_str, item_type, ammo_str = item_str.split(",")
                 slot = int(slot_str)
                 ammo = int(ammo_str)
@@ -780,16 +788,24 @@ def main():
                     if img_key in weapon_images:
                         new_weapon = Item(player.x, player.y, weapon_images[img_key], "weapon", item_type)
                         new_weapon.ammo = ammo
-                        player.inventory.append(new_weapon)
+                        temp_weapons[slot] = new_weapon  # שומרים לפי אינדקס
                     else:
                         print(f"[!] Warning: Unknown weapon '{item_type}' from DB")
 
-                # בדיקה אם זה שיקוי (סלוטים 5-10)
                 elif 5 <= slot <= 10:
                     if item_type == "Potion":
                         inventory.append(Potion(player.x, player.y, potion_img, "Potion"))
                     elif item_type == "Poison":
                         inventory.append(Potion(player.x, player.y, poison_img, "Poison"))
+
+            # עכשיו נכניס אותם לרשימת השחקן לפי הסדר (0 עד 4)
+            for i in range(5):
+                if i in temp_weapons:
+                    player.inventory.append(temp_weapons[i])
+
+        # ==========================================
+        # בניית המחרוזת לשליחה לשרת המשחק - מחוץ ל-if!!
+        # השרת מצפה להפרדה בעזרת מקף (-) ולמילה none עבור סלוט ריק!
         # ==========================================
         inv_str_parts = []
         for i in range(5):
@@ -797,13 +813,15 @@ def main():
                 inv_str_parts.append(f"{player.inventory[i].name},{player.inventory[i].ammo}")
             else:
                 inv_str_parts.append("none,0")
-        proper_inv_str = "-".join(inv_str_parts)
+
+        final_inv_str = "-".join(inv_str_parts)
 
         potions_names = [p.name for p in inventory]
         potions_str = ",".join(potions_names) if potions_names else "None"
 
+        # השליחה עצמה
         outgoing_messages_host.put(
-            f"Connected|{MY_ID}|{player_name}|{player.x},{player.y}|{player.hp}|{proper_inv_str}|{potions_str}")
+            f"Connected|{MY_ID}|{player_name}|{player.x},{player.y}|{player.hp}|{final_inv_str}|{potions_str}")
         outgoing_messages_host.put(f"UPDATE|{player.x},{player.y}")
 
         running = True
