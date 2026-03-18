@@ -42,7 +42,7 @@ POTION_LIST = [["Potion", 40],["Poison",5]]
 counter = count()
 monsters_list = []
 SERVER_FPS = 0
-SKILL_COOL_TIME = 12
+SKILL_COOL_TIME = 1
 
 LB_PORT = 8080
 
@@ -139,10 +139,11 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
                 state.players_pos[client_id] = "0,0"
                 state.players_hp[client_id] = 100
+                state.players_control[client_id] = True
             else:
                 state.players_pos[client_id] = parts[1]
                 state.players_hp[client_id] = parts[2]
-                state.players_control[client_id] = (parts[3] == "True")
+                state.players_control[client_id] = True
 
 
 
@@ -183,7 +184,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 return
             self.player_id = parts[1]
             client_id = self.player_id
-            state.players_control[client_id] = parts[2]
+            state.players_control[client_id] = (parts[2] == "True")
 
         # MOVEMENT
         elif data_str.startswith("UPDATE|"):
@@ -210,76 +211,97 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 state.players_pos[client_id] = new_pos
                 self.broadcast_player(client_id, new_pos, state.players_hp[client_id], False)
                 new_x = float(new_pos.split(",")[0])
+
                 if client_id not in state.players_control:
                     state.players_control[client_id] = True
+
                 if state.players_control[client_id]:
-                    if state.neighbor['left'] is not None:
-                        if new_x < float(state.server_area_left): #if he is getting out ouf the server zone
+
+                    # ------------------ מעבר שמאלה ------------------
+                    if state.neighbor.get('left') is not None:
+                        if state.server_area_left is not None and new_x < float(state.server_area_left):
                             nei_ip = state.neighbor['left'].split(':')[0]
                             nei_port = state.neighbor['left'].split(':')[1]
 
-                            if new_x + float(SCREEN_WIDTH) > float(state.server_area_left): #if he is between control zones
-                                # -------transfer client-------
-                                inv = state.players_inventory[client_id]
-                                inv_str = "-".join(
-                                    [f"{inv[i]['type']},{inv[i]['ammo']}" for i in range(INVENTORY_SIZE)])
-                                skill = state.players_skills[client_id]
-                                skill_str = f"{skill.name},{skill.duration_time},{skill.last_action_time},{skill.is_active}"
-                                pos = state.players_pos[client_id]
-                                hp = state.players_hp[client_id]
-                                potions = state.players_potions[client_id]
-                                msg = f"TRANSFER_PLAYER|{client_id}|{pos}|{hp}|{potions}|{inv_str}|{skill_str}"
-                                nei_ip, nei_port = state.neighbor['right'].split(':')
-                                asyncio.create_task(send_one_off_message(nei_ip, nei_port, msg))
+                            if new_x + float(SCREEN_WIDTH) > float(state.server_area_left):
+                                # דגל חסימת הצפות! בודק אם טרם שלחנו
+                                if not getattr(self, 'spectator_sent_left', False):
+                                    self.spectator_sent_left = True  # מסמן ששלחנו
 
+                                    # -------transfer client-------
+                                    inv = state.players_inventory[client_id]
+                                    inv_str = "-".join(
+                                        [f"{inv[i]['type']},{inv[i]['ammo']}" for i in range(INVENTORY_SIZE)])
+                                    skill = state.players_skills[client_id]
+                                    skill_str = f"{skill.name},{skill.duration_time},{skill.last_action_time},{skill.is_active}"
+                                    pos = state.players_pos[client_id]
+                                    hp = state.players_hp[client_id]
+                                    potions = state.players_potions[client_id]
+                                    msg = f"TRANSFER_PLAYER|{client_id}|{pos}|{hp}|{potions}|{inv_str}|{skill_str}"
 
-                                msg = f"SWITCHED|{nei_ip}|{nei_port}|False\n".encode()
-                                self._quic.send_stream_data(self.stream_id, msg, end_stream=False)
-                                self.transmit()
+                                    asyncio.create_task(send_one_off_message(nei_ip, nei_port, msg))
+
+                                    msg_switch = f"SWITCHED|{nei_ip}|{nei_port}|False\n".encode()
+                                    self._quic.send_stream_data(self.stream_id, msg_switch, end_stream=False)
+                                    self.transmit()
                             else:
-
-                                msg = f"SWITCHED|{nei_ip}|{nei_port}|True\n".encode()
-                                self._quic.send_stream_data(self.stream_id, msg, end_stream=False)
+                                msg_switch = f"SWITCHED|{nei_ip}|{nei_port}|True\n".encode()
+                                self._quic.send_stream_data(self.stream_id, msg_switch, end_stream=False)
                                 self.transmit()
+
+                                if self in state.active_clients:
+                                    state.active_clients.remove(self)
                                 self.disconnect()
-                                self.broadcast_remove(client_id)
+                        else:
+                            # מאפס את הדגל אם השחקן חזר פנימה לשרת המקורי
+                            self.spectator_sent_left = False
 
 
-                    if state.neighbor['right'] is not None:
-                        if float(new_x) > float(state.server_area_right):  #if he is getting out ouf the server zone
+                    # ------------------ מעבר ימינה ------------------
+                    elif state.neighbor.get('right') is not None:
+                        if state.server_area_right is not None and new_x > float(state.server_area_right):
                             nei_ip = state.neighbor['right'].split(':')[0]
                             nei_port = state.neighbor['right'].split(':')[1]
-                            if new_x + float(SCREEN_WIDTH) < float(state.server_area_left):  # if he is between control zones
 
-                                # -------transfer client-------
-                                inv = state.players_inventory[client_id]
-                                inv_str = "-".join(
-                                    [f"{inv[i]['type']},{inv[i]['ammo']}" for i in range(INVENTORY_SIZE)])
-                                skill = state.players_skills[client_id]
-                                skill_str = f"{skill.name},{skill.duration_time},{skill.last_action_time},{skill.is_active}"
-                                pos = state.players_pos[client_id]
-                                hp = state.players_hp[client_id]
-                                potions = state.players_potions[client_id]
-                                msg = f"TRANSFER_PLAYER|{client_id}|{pos}|{hp}|{potions}|{inv_str}|{skill_str}"
-                                nei_ip, nei_port = state.neighbor['right'].split(':')
-                                asyncio.create_task(send_one_off_message(nei_ip, nei_port, msg))
+                            if new_x - float(SCREEN_WIDTH) < float(state.server_area_right):
+                                # דגל חסימת הצפות! בודק אם טרם שלחנו
+                                if not getattr(self, 'spectator_sent_right', False):
+                                    self.spectator_sent_right = True  # מסמן ששלחנו
 
-                                msg = f"SWITCHED|{nei_ip}|{nei_port}|False\n".encode()
-                                self._quic.send_stream_data(self.stream_id, msg, end_stream=False)
-                                self.transmit()
+                                    # -------transfer client-------
+                                    inv = state.players_inventory[client_id]
+                                    inv_str = "-".join(
+                                        [f"{inv[i]['type']},{inv[i]['ammo']}" for i in range(INVENTORY_SIZE)])
+                                    skill = state.players_skills[client_id]
+                                    skill_str = f"{skill.name},{skill.duration_time},{skill.last_action_time},{skill.is_active}"
+                                    pos = state.players_pos[client_id]
+                                    hp = state.players_hp[client_id]
+                                    potions = state.players_potions[client_id]
+                                    msg = f"TRANSFER_PLAYER|{client_id}|{pos}|{hp}|{potions}|{inv_str}|{skill_str}"
+
+                                    asyncio.create_task(send_one_off_message(nei_ip, nei_port, msg))
+
+                                msg_switch = f"SWITCHED|{nei_ip}|{nei_port}|False\n".encode()
+                                    self._quic.send_stream_data(self.stream_id, msg_switch, end_stream=False)
+                                    self.transmit()
 
                             else:
-
-                                msg = f"SWITCHED|{nei_ip}|{nei_port}|True\n".encode()
-                                self._quic.send_stream_data(self.stream_id, msg, end_stream=False)
+                                # חצה לחלוטין
+                                msg_switch = f"SWITCHED|{nei_ip}|{nei_port}|True\n".encode()
+                                self._quic.send_stream_data(self.stream_id, msg_switch, end_stream=False)
                                 self.transmit()
+
+                                if self in state.active_clients:
+                                    state.active_clients.remove(self)
                                 self.disconnect()
-                                self.broadcast_remove(client_id)
+
+                        else:
+                            # מאפס את הדגל אם השחקן חזר פנימה לשרת המקורי
+                            self.spectator_sent_right = False
 
             else:
                 self.disconnect()
                 print("player has been kicked! movement problem")
-
         # ATTACK
         elif data_str.startswith("CHANGECONTROL|"):
             parts = data_str.split("|")
@@ -1086,7 +1108,7 @@ def check_movement(new_pos, old_pos, skill):
         old_x, old_y = map(float, old_pos.split(","))
     except:
         print("Error while splitting in check_movement!")
-        return
+        return False
     print(skill.is_active)
     if check_if_in_map(new_x, new_y):
         if state.game_map[int(new_y / TILE_SIZE)][int(new_x / TILE_SIZE)] == ".":

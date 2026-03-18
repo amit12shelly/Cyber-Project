@@ -947,17 +947,24 @@ def main():
                 parts = msg.split("|")
                 if not parts:
                     continue
-                if parts[0] == "SWITCH" and is_host_msg:
+                if parts[0] == "SWITCHED" and is_host_msg:
                     if len(parts) < 4:
                         continue
-                    is_host = parts[3]
+                    is_host = (parts[3] == "True")
                     if not is_host:
                         servers["spectator"] = Server(parts[1], parts[2], is_host)
                         start_quic_thread(servers["spectator"].ip, servers["spectator"].port)
                         outgoing_messages_spectator.put(f"ConnectedID|{MY_ID}|{False}")
                         outgoing_messages_spectator.put(f"UPDATE|{player.x},{player.y}")
                     else:
-                        del servers["spectator"]
+                        if "spectator" in servers:
+                            del servers["spectator"]
+
+                        while not outgoing_messages_host.empty():
+                            try:
+                                outgoing_messages_host.get_nowait()
+                            except:
+                                break
                         servers["host"] = Server(parts[1], parts[2], is_host)
                         start_quic_thread(servers["host"].ip, servers["host"].port)
                         outgoing_messages_host.put(f"ConnectedID|{MY_ID}|{True}")
