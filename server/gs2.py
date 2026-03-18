@@ -42,7 +42,7 @@ POTION_LIST = [["Potion", 40],["Poison",5]]
 counter = count()
 monsters_list = []
 SERVER_FPS = 0
-SKILL_COOL_TIME = 12
+SKILL_COOL_TIME = 1
 
 LB_PORT = 8080
 

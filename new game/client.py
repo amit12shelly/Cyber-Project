@@ -33,71 +33,48 @@ CHAT_X = 10
 CHAT_Y_BOTTOM_OFFSET = 120
 servers = {}
 
-
-async def quic_network_loop(ip, port, connection_type):
+async def quic_network_loop(ip, port):
     config = QuicConfiguration(
         is_client=True,
         alpn_protocols=["echo-protocol"],
         verify_mode=False
     )
+    is_host = servers["host"].ip == ip and servers["host"].port == port
     async with connect(ip, port, configuration=config) as client:
         stream_reader, stream_writer = await client.create_stream()
-        print(f"Connected to Game Server ({connection_type}) at {ip}:{port}!")
+        print(f"Connected to Game Server at {ip}:{port}!")
 
         async def read_from_server():
             buffer = ""
             while True:
-                # עוצר את הלולאה וסוגר חיבור אם החלפנו שרת
-                if connection_type not in servers or servers[connection_type].ip != ip or servers[
-                    connection_type].port != port:
-                    stream_writer.close()
-                    break
+                data = await stream_reader.read(4096)
+                if not data:
+                    await asyncio.sleep(0.01)
+                    continue
 
-                try:
-                    data = await asyncio.wait_for(stream_reader.read(4096), timeout=0.1)
-                    if not data:
-                        continue
-                    buffer += data.decode()
-                    while "\n" in buffer:
-                        msg, buffer = buffer.split("\n", 1)
-                        msg = msg.strip()
-                        if msg:
-                            incoming_messages.put(f"{connection_type}>{msg}")
-                except asyncio.TimeoutError:
-                    pass
-                except Exception as e:
-                    break
+                buffer += data.decode()
+
+                while "\n" in buffer:
+                    msg, buffer = buffer.split("\n", 1)
+                    msg = msg.strip()
+                    if msg:
+                        incoming_messages.put(f"{"host" if is_host else "spectator"}>{msg}")
 
         async def write_to_server():
             while True:
-                # עוצר את הלולאה אם החלפנו שרת
-                if connection_type not in servers or servers[connection_type].ip != ip or servers[
-                    connection_type].port != port:
-                    break
                 try:
-                    q = outgoing_messages_host if connection_type == "host" else outgoing_messages_spectator
-                    msg = q.get_nowait()
+                    msg = outgoing_messages_host.get_nowait() if is_host else outgoing_messages_spectator.get_nowait()
                     stream_writer.write((msg + "\n").encode())
                     await stream_writer.drain()
                 except queue.Empty:
                     await asyncio.sleep(0.01)
-                except Exception as e:
-                    break
+
+
 
         await asyncio.gather(read_from_server(), write_to_server())
 
-
-def start_quic_thread(ip, port, connection_type):
+def start_quic_thread(ip, port):
     loop = asyncio.new_event_loop()
-
-    def runner():
-        try:
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(quic_network_loop(ip, port, connection_type))
-        except Exception as e:
-            print(f"NETWORK THREAD ERROR ({connection_type}):", e)
-
-    threading.Thread(target=runner, daemon=True).start()
 
     def runner(target_ip, target_port):
         try:
@@ -758,7 +735,7 @@ def main():
         chat_input = ""
         chat_messages = []
         servers["host"] = Server(gs_ip, gs_port, True)
-        start_quic_thread(servers["host"].ip, servers["host"].port, "host")
+        start_quic_thread(servers["host"].ip, servers["host"].port)
 
         outgoing_messages_host.put(f"Connected|{player.x},{player.y}|{player.hp}")
         outgoing_messages_host.put(f"UPDATE|{player.x},{player.y}")
@@ -942,9 +919,9 @@ def main():
                         continue
                     is_host = (parts[3] == "True")
                     if not is_host:
-                        servers["spectator"] = Server(parts[1], int(parts[2]), is_host)
-                        start_quic_thread(servers["spectator"].ip, servers["spectator"].port, "spectator")
-                        outgoing_messages_spectator.put(f"ConnectedID|{MY_ID}|False")
+                        servers["spectator"] = Server(parts[1], parts[2], is_host)
+                        start_quic_thread(servers["spectator"].ip, servers["spectator"].port)
+                        outgoing_messages_spectator.put(f"ConnectedID|{MY_ID}|{False}")
                         outgoing_messages_spectator.put(f"UPDATE|{player.x},{player.y}")
                     else:
                         if "spectator" in servers:
@@ -955,11 +932,11 @@ def main():
                                 outgoing_messages_host.get_nowait()
                             except:
                                 break
-
-                        servers["host"] = Server(parts[1], int(parts[2]), is_host)
-                        start_quic_thread(servers["host"].ip, servers["host"].port, "host")
-                        outgoing_messages_host.put(f"ConnectedID|{MY_ID}|True")
+                        servers["host"] = Server(parts[1], parts[2], is_host)
+                        start_quic_thread(servers["host"].ip, servers["host"].port)
+                        outgoing_messages_host.put(f"ConnectedID|{MY_ID}|{True}")
                         outgoing_messages_host.put(f"UPDATE|{player.x},{player.y}")
+
 
                 if parts[0] == "UPDATE":
                     if len(parts) < 4:
@@ -1071,7 +1048,8 @@ def main():
                     chat_messages.append((f"<{display_name}> {parts[2]}", time.time()))
 
                 elif parts[0] == "SETID":
-                    MY_ID = parts[1]
+                    if MY_ID == "":
+                        MY_ID = parts[1]
 
                 elif parts[0] == "FPS" and is_host_msg:
                     server_fps = parts[1]
