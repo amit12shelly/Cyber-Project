@@ -315,9 +315,20 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                                 self._quic.send_stream_data(self.stream_id, msg_switch, end_stream=False)
                                 self.transmit()
 
+                                #disconnect
                                 if self in state.active_clients:
                                     state.active_clients.remove(self)
-                                self.disconnect()
+                                state.players_pos.pop(client_id, None)
+                                state.players_hp.pop(client_id, None)
+                                state.players_inventory.pop(client_id, None)
+                                state.players_potions.pop(client_id, None)
+                                state.players_skills.pop(client_id, None)
+                                state.player_name.pop(client_id, None)
+                                state.players_control.pop(client_id, None)
+                                state.player_real_id.pop(client_id, None)
+
+                                if self in state.active_clients:
+                                    state.active_clients.remove(self)
                                 print("out of border")
                         else:
                             # מאפס את הדגל אם השחקן חזר פנימה לשרת המקורי
@@ -360,7 +371,20 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
                                 if self in state.active_clients:
                                     state.active_clients.remove(self)
-                                self.disconnect()
+                                    # disconnect
+                                    if self in state.active_clients:
+                                        state.active_clients.remove(self)
+                                    state.players_pos.pop(client_id, None)
+                                    state.players_hp.pop(client_id, None)
+                                    state.players_inventory.pop(client_id, None)
+                                    state.players_potions.pop(client_id, None)
+                                    state.players_skills.pop(client_id, None)
+                                    state.player_name.pop(client_id, None)
+                                    state.players_control.pop(client_id, None)
+                                    state.player_real_id.pop(client_id, None)
+
+                                    if self in state.active_clients:
+                                        state.active_clients.remove(self)
                                 print("out of border")
 
                         else:
