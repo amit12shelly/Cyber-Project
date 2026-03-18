@@ -194,14 +194,21 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                     client_id = sent_id
 
                 # --- אתחול הנתונים לאחר שהקליינט עבר את הבדיקה בהצלחה ---
-                state.players_pos[client_id] = pos_str
-                state.players_hp[client_id] = c_hp
-                state.players_inventory[client_id] = c_inv_dict
-                state.player_name[client_id] = client_name
+                x_str = pos_str.split(",")[0]
+                if x_str < (state.server_area_right + SCREEN_WIDTH/2):
+                    if x_str > (state.server_area_left - SCREEN_WIDTH/2):
+                        state.players_pos[client_id] = pos_str
+                        state.players_hp[client_id] = c_hp
+                        state.players_inventory[client_id] = c_inv_dict
+                        state.player_name[client_id] = client_name
 
-                state.players_control[client_id] = True
-                state.players_potions[client_id] = 0
-                state.players_skills[client_id] = Skill("Speed Boost", 5, 0, False)
+                        state.players_control[client_id] = True
+                        state.players_potions[client_id] = 0
+                        state.players_skills[client_id] = Skill("Speed Boost", 5, 0, False)
+                    else:
+                        return
+                else:
+                    return
 
             else:
                 print("Cheat/Error detected: Missing arguments in Connected command!")
@@ -311,6 +318,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                                 if self in state.active_clients:
                                     state.active_clients.remove(self)
                                 self.disconnect()
+                                print("out of border")
                         else:
                             # מאפס את הדגל אם השחקן חזר פנימה לשרת המקורי
                             self.spectator_sent_left = False
@@ -353,6 +361,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                                 if self in state.active_clients:
                                     state.active_clients.remove(self)
                                 self.disconnect()
+                                print("out of border")
 
                         else:
                             # מאפס את הדגל אם השחקן חזר פנימה לשרת המקורי
@@ -651,7 +660,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 return
             msg = parts[1]
             state.pending_lb_updates.append(f"CHAT:{msg},{client_id}")
-            self.broadcast_chat(msg, client_id)
+            self.broadcast_chat(msg, state.player_name[client_id])
 
         elif data_str.startswith("SKILL|"):
             try:
@@ -777,8 +786,38 @@ class EchoQuicProtocol(QuicConnectionProtocol):
     def disconnect(self):
         client_id = self.player_id
 
+        # נודיע לכולם שהשחקן התנתק מהמפה
         self.broadcast_remove(client_id)
 
+        # נחלץ את ה-Real ID כדי לשלוח ל-LB
+        real_id = state.player_real_id.get(client_id)
+
+        # נשמור רק אם יש לו Real ID ואם הוא עדיין קיים במילוני הנתונים
+        if real_id and client_id in state.players_pos and client_id in state.players_hp and client_id in state.players_inventory:
+            pos = state.players_pos[client_id]
+            try:
+                x, y = pos.split(",")
+            except:
+                x, y = 0, 0
+
+            hp = state.players_hp[client_id]
+            inv = state.players_inventory[client_id]
+
+            # הופכים את המילון של התיק למחרוזת בפורמט שביקשת
+            inv_items = []
+            for i in range(INVENTORY_SIZE):
+                if i in inv:
+                    inv_items.append(f"{inv[i]['type']},{inv[i]['ammo']}")
+                else:
+                    inv_items.append("none,0")
+            inv_str = "-".join(inv_items)
+
+            # מוסיפים את הודעת השמירה לתור שיישלח ל-Load Balancer ב-Heartbeat הבא
+            save_msg = f"SAVE:{real_id},{x},{y},{hp},{inv_str}"
+            state.pending_lb_updates.append(save_msg)
+            print(f"Added SAVE request for player {real_id}")
+
+        # מחיקת השחקן מכל המילונים הרלוונטיים (בטוח, ללא קריסות KeyError)
         state.players_pos.pop(client_id, None)
         state.players_hp.pop(client_id, None)
         state.players_inventory.pop(client_id, None)
