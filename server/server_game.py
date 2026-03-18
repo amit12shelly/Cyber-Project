@@ -282,7 +282,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                             nei_ip = state.neighbor['left'].split(':')[0]
                             nei_port = state.neighbor['left'].split(':')[1]
 
-                            if new_x + float(SCREEN_WIDTH) > float(state.server_area_left):
+                            if new_x  > (float(state.server_area_right) - float(SCREEN_WIDTH)/2):
                                 # דגל חסימת הצפות! בודק אם טרם שלחנו
                                 if not getattr(self, 'spectator_sent_left', False):
                                     self.spectator_sent_left = True  # מסמן ששלחנו
@@ -318,11 +318,11 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
                     # ------------------ מעבר ימינה ------------------
                     elif state.neighbor.get('right') is not None:
-                        if state.server_area_right is not None and new_x > float(state.server_area_right):
+                        if state.server_area_right is not None and new_x < float(state.server_area_right):
                             nei_ip = state.neighbor['right'].split(':')[0]
                             nei_port = state.neighbor['right'].split(':')[1]
 
-                            if new_x - float(SCREEN_WIDTH) < float(state.server_area_right):
+                            if new_x  < (float(state.server_area_right) + float(SCREEN_WIDTH)/2):
                                 # דגל חסימת הצפות! בודק אם טרם שלחנו
                                 if not getattr(self, 'spectator_sent_right', False):
                                     self.spectator_sent_right = True  # מסמן ששלחנו
