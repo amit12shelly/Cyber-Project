@@ -335,11 +335,11 @@ class ExplosionEffect:
                 (int(self.x - camera_x), int(self.y - camera_y)),
                 max(10, radius)
             )
-         # חלקיקי אש
+        # חלקיקי אש
         for p in self.particles:
             alpha = int(255 * (p["life"] / 45))
 
-            surf = pygame.Surface((int(p["size"]*2)+2, int(p["size"]*2)+2), pygame.SRCALPHA)
+            surf = pygame.Surface((int(p["size"] * 2) + 2, int(p["size"] * 2) + 2), pygame.SRCALPHA)
 
             pygame.draw.circle(
                 surf,
@@ -357,11 +357,11 @@ class ExplosionEffect:
         for s in self.smoke:
             alpha = int(120 * (s["life"] / 80))
 
-            surf = pygame.Surface((int(s["size"]*2), int(s["size"]*2)), pygame.SRCALPHA)
+            surf = pygame.Surface((int(s["size"] * 2), int(s["size"] * 2)), pygame.SRCALPHA)
 
             pygame.draw.circle(
                 surf,
-                (90,90,90, alpha),
+                (90, 90, 90, alpha),
                 (int(s["size"]), int(s["size"])),
                 int(s["size"])
             )
@@ -371,7 +371,8 @@ class ExplosionEffect:
                 (s["x"] - camera_x - s["size"], s["y"] - camera_y - s["size"])
             )
 
-#-----------------SERVER CLASS-----------------#
+
+# -----------------SERVER CLASS-----------------#
 class Server:
     def __init__(self, ip, port, is_hosting):
         self.ip = ip
@@ -1028,7 +1029,8 @@ def main():
                 if chat_open:
                     if event.key == pygame.K_RETURN:
                         if chat_input.strip():
-                            outgoing_messages_host.put(f"CHAT|{chat_input.strip()}")                            if "spectator" in servers:
+                            outgoing_messages_host.put(f"CHAT|{chat_input.strip()}")
+                            if "spectator" in servers:
                                 outgoing_messages_spectator.put(f"CHAT|{chat_input.strip()}")
                         chat_input = ""
                         chat_open = False
@@ -1068,7 +1070,8 @@ def main():
                         inventory.append(nearby_potion)
                         outgoing_messages_host.put(f"PPICKUP|{nearby_potion.x},{nearby_potion.y}|{nearby_potion.name}")
                         if "spectator" in servers:
-                            outgoing_messages_spectator.put(f"PPICKUP|{nearby_potion.x},{nearby_potion.y}|{nearby_potion.name}")
+                            outgoing_messages_spectator.put(
+                                f"PPICKUP|{nearby_potion.x},{nearby_potion.y}|{nearby_potion.name}")
                         print(nearby_potion.name)
                         print("Picked potion")
 
@@ -1194,7 +1197,7 @@ def main():
                         if "spectator" in servers:
                             outgoing_messages_spectator.put(f"UPDATE|{player.x},{player.y}")
                     else:
-                        remote_players[player_id].update_from_server(x, y, hp,has_weapon)
+                        remote_players[player_id].update_from_server(x, y, hp, has_weapon)
             elif parts[0] == "SWITCHED" and is_host_msg:
                 if len(parts) < 4:
                     continue
@@ -1421,7 +1424,8 @@ def main():
             bullet_y     = float(bullets[i]["y"])
             bullet_angle = float(bullets[i]["angle"])
             bullet_type = str(bullets[i]["type"])
-            draw_bullet(screen, bullet_img if bullet_type == "bullet" else bomb_img,bullet_x, bullet_y, bullet_angle, camera_x, camera_y, bullet_type)
+            draw_bullet(screen, bullet_img if bullet_type == "bullet" else bomb_img,bullet_x, bullet_y, bullet_angle, camera_x,
+                        camera_y, bullet_type)
             new_x, new_y = get_next_bullet_position(bullet_x, bullet_y, bullet_angle)
             bullets[i]["x"] = new_x
             bullets[i]["y"] = new_y
