@@ -227,6 +227,42 @@ async def handle_gs_lifecycle(reader, writer):
                     if abs(old_cpu - cpu_load) > 100: #or len(parts) > 3 אם יש שינויים בדברים
                         await divide_map()
 
+            elif parts[0] == "RegisterPlayer":
+                if len(parts) < 7:
+                    writer.write(b"Error|Invalid Format\n")
+                    await writer.drain()
+                    continue
+
+                p_id, p_name, px, py, php, pinv = parts[1:7]
+                px_int = int(px)
+
+                # 1. מציאת השרת המתאים לפי מיקום X
+                target_gs = None
+                for s in servers:
+                    if s.get_x_min() <= px_int < s.get_x_max():
+                        target_gs = s
+                        break
+
+                if target_gs:
+                    # 2. שליחת הודעה ל-GS שיכין מקום לשחקן (Authoritative Data)
+                    # ה-GS צריך להכיר פקודה בשם ExpectPlayer
+                    expect_msg = f"ExpectPlayer|{p_id}|{p_name}|{px}|{py}|{php}|{pinv}\n"
+                    try:
+                        target_gs.writer.write(expect_msg.encode())
+                        await target_gs.writer.drain()
+
+                        # 3. החזרת תשובה ל-Login Server
+                        response = f"BestServer|{target_gs.id}|{target_gs.ip}|{target_gs.port}\n"
+                    except Exception as e:
+                        print(f"[!] Failed to notify GS-{target_gs.id}: {e}")
+                        response = "Error|GS Communication Failed\n"
+                else:
+                    response = "Error|No Server Available for this position\n"
+
+                writer.write(response.encode())
+                await writer.drain()
+
+
             elif parts[0] == "GetServer":
                 px = int(parts[1])
 

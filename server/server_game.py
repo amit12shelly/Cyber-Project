@@ -135,7 +135,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             #
             selected_skill = Skill("Speed Boost", 5, 0, False)
             state.players_skills[client_id] = selected_skill
-            if len(parts) < 4:
+            if len(parts) < 3:
 
                 state.players_pos[client_id] = "0,0"
                 state.players_hp[client_id] = 100
@@ -246,7 +246,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
 
                     if state.neighbor['right'] is not None:
-                        if new_x > float(state.server_area_right):  #if he is getting out ouf the server zone
+                        if float(new_x) > float(state.server_area_right):  #if he is getting out ouf the server zone
                             nei_ip = state.neighbor['right'].split(':')[0]
                             nei_port = state.neighbor['right'].split(':')[1]
                             if new_x + float(SCREEN_WIDTH) < float(state.server_area_left):  # if he is between control zones
@@ -263,7 +263,6 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                                 msg = f"TRANSFER_PLAYER|{client_id}|{pos}|{hp}|{potions}|{inv_str}|{skill_str}"
                                 nei_ip, nei_port = state.neighbor['right'].split(':')
                                 asyncio.create_task(send_one_off_message(nei_ip, nei_port, msg))
-
 
                                 msg = f"SWITCHED|{nei_ip}|{nei_port}|False\n".encode()
                                 self._quic.send_stream_data(self.stream_id, msg, end_stream=False)
