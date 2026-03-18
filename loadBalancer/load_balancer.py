@@ -244,8 +244,6 @@ async def handle_gs_lifecycle(reader, writer):
                         break
 
                 if target_gs:
-                    # 2. שליחת הודעה ל-GS שיכין מקום לשחקן (Authoritative Data)
-                    # ה-GS צריך להכיר פקודה בשם ExpectPlayer
                     expect_msg = f"ExpectPlayer|{p_id}|{p_name}|{px}|{py}|{php}|{pinv}\n"
                     try:
                         target_gs.writer.write(expect_msg.encode())
