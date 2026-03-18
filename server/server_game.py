@@ -360,6 +360,9 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
                             if self in state.active_clients:
                                 state.active_clients.remove(self)
+
+                            message = f"DISCONNECT|{state.player_real_id[client_id]}"
+                            send_to_lb(message)
                             print("out of border")
                             return
 
@@ -420,6 +423,9 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
                                 if self in state.active_clients:
                                     state.active_clients.remove(self)
+
+                                message = f"DISCONNECT|{state.player_real_id[client_id]}"
+                                send_to_lb(message)
                             print("out of border")
                             return
 
