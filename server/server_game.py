@@ -119,6 +119,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
         # CONNECTED
         client_id = self.player_id
         # CONNECTED
+        # CONNECTED
         if data_str.startswith("Connected|"):
             try:
                 parts = data_str.split("|")
@@ -127,7 +128,8 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 self.disconnect()
                 return
 
-            if len(parts) >= 6:
+            # שינינו ל-7 כדי להכיל את הפושנים
+            if len(parts) >= 7:
                 sent_id = parts[1]
                 client_name = parts[2]
                 pos_str = parts[3]
@@ -150,6 +152,12 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                     else:
                         c_inv_dict[i] = {"type": "none", "ammo": 0}
 
+                # 1.5 בונים את רשימת הפושנים שהקליינט טוען שיש לו
+                c_potions_str = parts[6]
+                c_potions = []
+                if c_potions_str and c_potions_str not in ("None", "Empty"):
+                    c_potions = c_potions_str.split(",")
+
                 # 2. שלב האבטחה (Validation) מול הנתונים מה-LB
                 if sent_id in state.expected_players:
                     expected_data = state.expected_players[sent_id]
@@ -158,49 +166,55 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                     e_y = expected_data["y"]
                     e_hp = expected_data["hp"]
                     e_inv = expected_data["inv"]
+                    e_potions = expected_data["potions"]
 
-                    # בדיקת מיקום: שמים סובלנות (Tolerance) של 10 פיקסלים בגלל המרות של float
+                    # מיקום
                     if abs(c_x - e_x) > 10 or abs(c_y - e_y) > 10:
-                        print(f"Cheat detected! Position mismatch. Client claimed: {c_x},{c_y}. Expected: {e_x},{e_y}")
+                        print(f"Cheat detected! Position mismatch. Client: {c_x},{c_y}. Expected: {e_x},{e_y}")
                         self.disconnect()
                         return
 
-                    # בדיקת חיים: התאמה מדויקת
+                    # חיים
                     if c_hp != e_hp:
-                        print(f"Cheat detected! HP mismatch. Client claimed: {c_hp}. Expected: {e_hp}")
+                        print(f"Cheat detected! HP mismatch. Client: {c_hp}. Expected: {e_hp}")
                         self.disconnect()
                         return
 
-                    # בדיקת אינוונטרי: בודק כל משבצת ותחמושת
+                    # אינוונטרי
                     for i in range(INVENTORY_SIZE):
                         if c_inv_dict[i]["type"] != e_inv[i]["type"] or c_inv_dict[i]["ammo"] != e_inv[i]["ammo"]:
                             print(f"Cheat detected! Inventory mismatch at slot {i}.")
                             self.disconnect()
                             return
 
+                    # פושנים - בודקים שיש להם את אותם פושנים בדיוק
+                    if sorted(c_potions) != sorted(e_potions):
+                        print("Cheat detected! Potions mismatch.")
+                        self.disconnect()
+                        return
+
                     print(f"Player {client_name} passed security validation successfully!")
 
-                    # מעדכנים את ה-ID מ-Fake ID ל-Real ID
                     real_id = expected_data["id"]
                     state.player_real_id[client_id] = real_id
-
-                    # מוחקים את השחקן מרשימת המצופים (כדי למנוע שימוש חוזר באותו Fake ID)
                     del state.expected_players[sent_id]
 
                 else:
                     return
 
-                # --- אתחול הנתונים לאחר שהקליינט עבר את הבדיקה בהצלחה ---
+                # --- אתחול הנתונים ---
                 x_str = pos_str.split(",")[0]
-                if float(x_str) < (float(state.server_area_right) + float(SCREEN_WIDTH)/2):
-                    if float(x_str) > (float(state.server_area_left) - float(SCREEN_WIDTH)/2):
+                if float(x_str) < (float(state.server_area_right) + float(SCREEN_WIDTH) / 2):
+                    if float(x_str) > (float(state.server_area_left) - float(SCREEN_WIDTH) / 2):
                         state.players_pos[client_id] = pos_str
                         state.players_hp[client_id] = c_hp
                         state.players_inventory[client_id] = c_inv_dict
                         state.player_name[client_id] = client_name
-
                         state.players_control[client_id] = True
-                        state.players_potions[client_id] = 0
+
+                        # מכניסים את הפושנים האמיתיים שעברו ולידציה!
+                        state.players_potions[client_id] = c_potions
+
                         state.players_skills[client_id] = Skill("Speed Boost", 5, 0, False)
                     else:
                         return
@@ -299,7 +313,8 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                                     skill_str = f"{skill.name},{skill.duration_time},{skill.last_action_time},{skill.is_active}"
                                     pos = state.players_pos[client_id]
                                     hp = state.players_hp[client_id]
-                                    potions = state.players_potions[client_id]
+                                    potions_list = state.players_potions[client_id]
+                                    potions = ",".join(potions_list) if potions_list else "None"
                                     msg = f"TRANSFER_PLAYER|{client_id}|{pos}|{hp}|{potions}|{inv_str}|{skill_str}"
 
                                     asyncio.create_task(send_one_off_message(nei_ip, nei_port, msg))
@@ -351,7 +366,8 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                                     skill_str = f"{skill.name},{skill.duration_time},{skill.last_action_time},{skill.is_active}"
                                     pos = state.players_pos[client_id]
                                     hp = state.players_hp[client_id]
-                                    potions = state.players_potions[client_id]
+                                    potions_list = state.players_potions[client_id]
+                                    potions = ",".join(potions_list) if potions_list else "None"
                                     msg = f"TRANSFER_PLAYER|{client_id}|{pos}|{hp}|{potions}|{inv_str}|{skill_str}"
 
                                     asyncio.create_task(send_one_off_message(nei_ip, nei_port, msg))
@@ -561,7 +577,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                     print(p_data["type"])
                     if p_data["type"] == pickup_type:
                         print("sup dog up the hp")
-                        state.players_potions[client_id] += 1
+                        state.players_potions[client_id].append(pickup_type)
                         found_potion_id = p_id
                         break
 
@@ -589,14 +605,14 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
             if client_id not in state.players_hp:
                 return
-            if state.players_potions[client_id] <= 0:
+            if item_name not in state.players_potions[client_id]:
                 return
+            state.players_potions[client_id].remove(item_name)
 
             if item_name == "Potion":
                 state.players_hp[client_id] += UP_HP
                 if state.players_hp[client_id] > 100:
                     state.players_hp[client_id] = 100
-                state.players_potions[client_id] -= 1
                 self.broadcast_player(client_id, state.players_pos[client_id], state.players_hp[client_id], True)
 
             elif item_name == "Poison":
@@ -604,7 +620,6 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                     return
                 pos = parts[2]
                 poison_x, poison_y = map(float, pos.split(","))
-                state.players_potions[client_id] -= 1
                 self.broadcast_poison(poison_x, poison_y)
 
                 async def poison_effect():
@@ -807,13 +822,9 @@ class EchoQuicProtocol(QuicConnectionProtocol):
     def disconnect(self):
         client_id = self.player_id
 
-        # נודיע לכולם שהשחקן התנתק מהמפה
         self.broadcast_remove(client_id)
-
-        # נחלץ את ה-Real ID כדי לשלוח ל-LB
         real_id = state.player_real_id.get(client_id)
 
-        # נשמור רק אם יש לו Real ID ואם הוא עדיין קיים במילוני הנתונים
         if real_id and client_id in state.players_pos and client_id in state.players_hp and client_id in state.players_inventory:
             pos = state.players_pos[client_id]
             try:
@@ -824,6 +835,11 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             hp = state.players_hp[client_id]
             inv = state.players_inventory[client_id]
 
+            # --- טיפול בפושנים ---
+            potions_list = state.players_potions.get(client_id, [])
+            # שומרים כרשימה מופרדת בפסיקים, או מחרוזת "None" אם התיק ריק
+            potions_str = ",".join(potions_list) if potions_list else "None"
+
             # הופכים את המילון של התיק למחרוזת בפורמט שביקשת
             inv_items = []
             for i in range(INVENTORY_SIZE):
@@ -831,12 +847,14 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                     inv_items.append(f"{inv[i]['type']},{inv[i]['ammo']}")
                 else:
                     inv_items.append("none,0")
-            inv_str = "-".join(inv_items)
+            inv_str = ";".join(inv_items)
 
-            # מוסיפים את הודעת השמירה לתור שיישלח ל-Load Balancer ב-Heartbeat הבא
-            save_msg = f"SAVE:{real_id},{x},{y},{hp},{inv_str}"
-            state.pending_lb_updates.append(save_msg)
-            print(f"Added SAVE request for player {real_id}")
+            # מוסיפים את הפושנים בסוף הודעת השמירה
+            save_msg = f"SAVE|{real_id}|{x}|{y}|{hp}|{inv_str}|{potions_str}\n"
+
+            if hasattr(state, 'lb_writer') and state.lb_writer:
+                state.lb_writer.write(save_msg.encode())
+                print(f"[!] Sent immediate SAVE for player {real_id}")
 
         # מחיקת השחקן מכל המילונים הרלוונטיים (בטוח, ללא קריסות KeyError)
         state.players_pos.pop(client_id, None)
@@ -1536,57 +1554,92 @@ async def connect_to_lb():
                     except Exception as e:
                         print("[LB] Failed parsing UpdateArea:", e)
 
+
                 elif msg.startswith("ExpectPlayer"):
-                        try:
-                            # חיתוך ההודעה לפי '|' וניקוי רווחים מיותרים
-                            parts = [p.strip() for p in msg.split("|")]
 
-                            # מוודאים שיש לנו את כל 8 החלקים (0 עד 7)
-                            if len(parts) >= 8:
-                                p_id = parts[1]
-                                fake_id = parts[2]
-                                p_name = parts[3]
-                                px = float(parts[4])
-                                py = float(parts[5])
-                                php = int(parts[6])
-                                pinv_str = parts[7]
+                    try:
 
-                                # 1. קודם כל מאתחלים תיק ריק כברירת מחדל
-                                inv_dict = {int(i): {"type": "none", "ammo": 0} for i in range(INVENTORY_SIZE)}
+                        # חיתוך ההודעה לפי '|' וניקוי רווחים מיותרים
 
-                                # 2. בודקים אם יש נתונים אמיתיים (מוודאים שזה לא "Empty" או "None")
-                                if pinv_str and pinv_str not in ("None", "Empty"):
-                                    # הלוגין סרבר מפריד פריטים עם נקודה-פסיק
-                                    items_list = pinv_str.split(";")
-                                    for item_str in items_list:
-                                        if not item_str:
-                                            continue
+                        parts = [p.strip() for p in msg.split("|")]
 
-                                        try:
-                                            # הלוגין סרבר שולח 3 נתונים: סלוט, סוג, תחמושת
-                                            slot_str, w_type, ammo_str = item_str.split(",")
-                                            slot = int(slot_str)
+                        # שים לב: שינינו ל-9 כי עכשיו יש גם פושנים בסוף
 
-                                            # מכניסים לתיק רק אם הסלוט חוקי (0 עד 4)
-                                            if 0 <= slot < INVENTORY_SIZE:
-                                                inv_dict[slot] = {"type": w_type, "ammo": int(ammo_str)}
-                                        except ValueError:
-                                            # אם יש פריט משובש מהדאטה-בייס, נתעלם ממנו כדי שהשרת לא יקרוס
-                                            pass
+                        if len(parts) >= 9:
 
-                                # 3. שומרים במילון תחת ה-fake_id
-                                state.expected_players[fake_id] = {
-                                    "id": p_id,
-                                    "x": px,
-                                    "y": py,
-                                    "hp": php,
-                                    "inv": inv_dict
-                                }
+                            p_id = parts[1]
 
-                                print(f"[LB] Expected player {p_name} (Fake ID: {fake_id}) is ready to transfer.")
+                            fake_id = parts[2]
 
-                        except Exception as e:
-                            print(f"[LB] Error parsing ExpectPlayer: {e}")
+                            p_name = parts[3]
+
+                            px = float(parts[4])
+
+                            py = float(parts[5])
+
+                            php = int(parts[6])
+
+                            pinv_str = parts[7]
+
+                            potions_str = parts[8]  # <-- הנתון החדש מה-LB
+
+                            # 1. אינוונטרי
+
+                            inv_dict = {int(i): {"type": "none", "ammo": 0} for i in range(INVENTORY_SIZE)}
+
+                            if pinv_str and pinv_str not in ("None", "Empty"):
+
+                                items_list = pinv_str.split(";")
+
+                                for item_str in items_list:
+
+                                    if not item_str:
+                                        continue
+
+                                    try:
+
+                                        slot_str, w_type, ammo_str = item_str.split(",")
+
+                                        slot = int(slot_str)
+
+                                        if 0 <= slot < INVENTORY_SIZE:
+                                            inv_dict[slot] = {"type": w_type, "ammo": int(ammo_str)}
+
+                                    except ValueError:
+
+                                        pass
+
+                            # 2. חילוץ הפושנים
+
+                            expected_potions = []
+
+                            if potions_str and potions_str not in ("None", "Empty"):
+                                expected_potions = potions_str.split(",")
+
+                            # 3. שומרים הכל במילון
+
+                            state.expected_players[fake_id] = {
+
+                                "id": p_id,
+
+                                "x": px,
+
+                                "y": py,
+
+                                "hp": php,
+
+                                "inv": inv_dict,
+
+                                "potions": expected_potions  # <-- שומרים את הפושנים לולידציה
+
+                            }
+
+                            print(f"[LB] Expected player {p_name} (Fake ID: {fake_id}) is ready to transfer.")
+
+
+                    except Exception as e:
+
+                        print(f"[LB] Error parsing ExpectPlayer: {e}")
                 # expected_players = {} #fake_id -> {id,x,y,hp,inv}
                 # ExpectPlayer | {p_id} | {fake_id} | {p_name} | {px} | {py} | {php} | {pinv}
                 elif msg.startswith("CHAT"):
@@ -1807,12 +1860,11 @@ async def handle_neighbor_connection(reader, writer):
 
             parts = msg.split("|")
 
-
             if parts[0] == "TRANSFER_PLAYER":
                 client_id = parts[1]
                 pos = parts[2]
                 hp = int(parts[3])
-                potions = int(parts[4])
+                potions_str = parts[4]
                 inv_str = parts[5]
                 skill_str = parts[6]
 
@@ -1820,7 +1872,10 @@ async def handle_neighbor_connection(reader, writer):
 
                 state.players_pos[client_id] = pos
                 state.players_hp[client_id] = hp
-                state.players_potions[client_id] = potions
+
+                # התיקון הקטן כאן - מוודא שזה לא "None"
+                state.players_potions[client_id] = potions_str.split(",") if potions_str and potions_str != "None" else []
+
                 state.players_control[client_id] = True
 
                 state.players_inventory[client_id] = {}
