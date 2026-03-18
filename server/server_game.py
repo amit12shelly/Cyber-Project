@@ -126,7 +126,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
 
             state.players_inventory[client_id] = {int(i): {"type": "none", "ammo": 0} for i in range(INVENTORY_SIZE)}
-            state.players_potions[client_id] = 0
+            state.players_potions[client_id] = []
 
             id_msg = f"SETID|{client_id}\n".encode()
             if self.stream_id is not None:
@@ -347,7 +347,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                     print(p_data["type"])
                     if p_data["type"] == pickup_type:
                         print("sup dog up the hp")
-                        state.players_potions[client_id] += 1
+                        state.players_potions[client_id].append(pickup_type)
                         found_potion_id = p_id
                         break
 
@@ -371,17 +371,16 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 return
 
             item_name = parts[1]
-
-            if client_id not in state.players_hp:
+            if item_name not in state.players_potions[client_id]:
                 return
-            if state.players_potions[client_id] <= 0:
+            state.players_potions[client_id].remove(item_name)
+            if client_id not in state.players_hp:
                 return
 
             if item_name == "Potion":
                 state.players_hp[client_id] += UP_HP
                 if state.players_hp[client_id] > 100:
                     state.players_hp[client_id] = 100
-                state.players_potions[client_id] -= 1
                 self.broadcast_player(client_id, state.players_pos[client_id], state.players_hp[client_id], True)
 
             elif item_name == "Poison":
@@ -389,7 +388,6 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                     return
                 pos = parts[2]
                 poison_x, poison_y = map(float, pos.split(","))
-                state.players_potions[client_id] -= 1
                 self.broadcast_poison(poison_x, poison_y)
 
                 async def poison_effect():
@@ -500,7 +498,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             state.players_pos[client_id]       = spawn_pos
             state.players_hp[client_id]        = 100
             state.players_inventory[client_id] = {int(i): {"type": "none", "ammo": 0} for i in range(INVENTORY_SIZE)}
-            state.players_potions[client_id]   = 0
+            state.players_potions[client_id] = []
             state.players_skills[client_id]    = Skill("Speed Boost", 5, 0, False)
             if self.stream_id is not None:
                 self._quic.send_stream_data(self.stream_id, f"RESPAWNED|{spawn_pos}|100\n".encode(), end_stream=False)
