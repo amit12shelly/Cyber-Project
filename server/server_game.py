@@ -776,18 +776,18 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
     def disconnect(self):
         client_id = self.player_id
+
         self.broadcast_remove(client_id)
 
-        if client_id in state.players_pos:
-            del state.players_pos[client_id]
-        if client_id in state.players_hp:
-            del state.players_hp[client_id]
-        if client_id in state.players_inventory:
-            del state.players_inventory[client_id]
-        if client_id in state.players_potions:
-            del state.players_potions[client_id]
-        if client_id in state.players_skills:
-            del state.players_skills[client_id]
+        state.players_pos.pop(client_id, None)
+        state.players_hp.pop(client_id, None)
+        state.players_inventory.pop(client_id, None)
+        state.players_potions.pop(client_id, None)
+        state.players_skills.pop(client_id, None)
+        state.player_name.pop(client_id, None)
+        state.players_control.pop(client_id, None)
+        state.player_real_id.pop(client_id, None)
+
         if self in state.active_clients:
             state.active_clients.remove(self)
 
