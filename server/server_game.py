@@ -65,7 +65,10 @@ class GameState:
     active_bullets = {}  # bullet_id -> {x, y, angle}
     players_skills = {}  #client_id -> {skill name, is active, last activation time}
     players_potions = {}
+    player_real_id = {} #client_id -> real_id
     players_control = {} #client_id -> True-this server control this client/False - the opposite
+    expected_players = {} #fake_id -> {id,x,y,hp,inv}
+    player_name = {} #client_id -> name
 
     #lb info
     neighbor = {}  # left -> x,ip,port /right -> x,ip,port
@@ -110,46 +113,102 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             self.disconnect()
 
     def handle_message(self, data_str: str):
-        client_id = self.player_id
+
         print(data_str)
 
         # CONNECTED
-        if data_str.startswith("Connected"):
-            print(client_id, "connected!")
+        client_id = ""
+        # CONNECTED
+        if data_str.startswith("Connected|"):
             try:
                 parts = data_str.split("|")
             except:
                 print("Error while splitting Connected command!")
+                self.disconnect()
                 return
 
-            # skills_dict = {
-            #     "Speed Boost": Skill("Speed Boost", 5, 5, 0, False),
-            #     "Shield": Skill("Shield", 5, 5, 0, False)
-            # }
-            # try:
-            #     selected_skill = skills_dict[parts[3]]
-            # except:
-            #     print("Skill not selected")
-            #     self.disconnect()
-            #     return
-            #
-            selected_skill = Skill("Speed Boost", 5, 0, False)
-            state.players_skills[client_id] = selected_skill
-            if len(parts) < 3:
+            if len(parts) >= 6:
+                sent_id = parts[1]
+                client_name = parts[2]
+                pos_str = parts[3]
 
-                state.players_pos[client_id] = "0,0"
-                state.players_hp[client_id] = 100
+                try:
+                    c_x, c_y = map(float, pos_str.split(","))
+                    c_hp = int(parts[4])
+                except ValueError:
+                    print("Cheat/Error detected: Invalid numbers in Connected!")
+                    self.disconnect()
+                    return
+
+                # 1. בונים את האינוונטרי שהקליינט טוען שיש לו
+                c_inv_dict = {}
+                inv_items = parts[5].split("-")
+                for i in range(INVENTORY_SIZE):
+                    if i < len(inv_items):
+                        w_type, ammo = inv_items[i].split(",")
+                        c_inv_dict[i] = {"type": w_type, "ammo": int(ammo)}
+                    else:
+                        c_inv_dict[i] = {"type": "none", "ammo": 0}
+
+                # 2. שלב האבטחה (Validation) מול הנתונים מה-LB
+                if sent_id in state.expected_players:
+                    expected_data = state.expected_players[sent_id]
+
+                    e_x = expected_data["x"]
+                    e_y = expected_data["y"]
+                    e_hp = expected_data["hp"]
+                    e_inv = expected_data["inv"]
+
+                    # בדיקת מיקום: שמים סובלנות (Tolerance) של 10 פיקסלים בגלל המרות של float
+                    if abs(c_x - e_x) > 10 or abs(c_y - e_y) > 10:
+                        print(f"Cheat detected! Position mismatch. Client claimed: {c_x},{c_y}. Expected: {e_x},{e_y}")
+                        self.disconnect()
+                        return
+
+                    # בדיקת חיים: התאמה מדויקת
+                    if c_hp != e_hp:
+                        print(f"Cheat detected! HP mismatch. Client claimed: {c_hp}. Expected: {e_hp}")
+                        self.disconnect()
+                        return
+
+                    # בדיקת אינוונטרי: בודק כל משבצת ותחמושת
+                    for i in range(INVENTORY_SIZE):
+                        if c_inv_dict[i]["type"] != e_inv[i]["type"] or c_inv_dict[i]["ammo"] != e_inv[i]["ammo"]:
+                            print(f"Cheat detected! Inventory mismatch at slot {i}.")
+                            self.disconnect()
+                            return
+
+                    print(f"Player {client_name} passed security validation successfully!")
+
+                    # מעדכנים את ה-ID מ-Fake ID ל-Real ID
+                    real_id = expected_data["id"]
+                    self.player_id = real_id
+                    client_id = real_id
+
+                    # מוחקים את השחקן מרשימת המצופים (כדי למנוע שימוש חוזר באותו Fake ID)
+                    del state.expected_players[sent_id]
+
+                else:
+                    # הגעה ראשונית לשרת (ללא מעבר P2P) או כניסה רגילה מהלוגין
+                    self.player_id = sent_id
+                    client_id = sent_id
+
+                # --- אתחול הנתונים לאחר שהקליינט עבר את הבדיקה בהצלחה ---
+                state.players_pos[client_id] = pos_str
+                state.players_hp[client_id] = c_hp
+                state.players_inventory[client_id] = c_inv_dict
+                state.player_name[client_id] = client_name
+
                 state.players_control[client_id] = True
+                state.players_potions[client_id] = 0
+                state.players_skills[client_id] = Skill("Speed Boost", 5, 0, False)
+
             else:
-                state.players_pos[client_id] = parts[1]
-                state.players_hp[client_id] = parts[2]
-                state.players_control[client_id] = True
-
-
-
-            state.players_inventory[client_id] = {int(i): {"type": "none", "ammo": 0} for i in range(INVENTORY_SIZE)}
-            state.players_potions[client_id] = 0
-
+                print("Cheat/Error detected: Missing arguments in Connected command!")
+                self.disconnect()
+                return
+            print("player connected!")
+            # --- המשך ההתחברות והשליחה למשתמשים האחרים ---
             id_msg = f"SETID|{client_id}\n".encode()
             if self.stream_id is not None:
                 self._quic.send_stream_data(self.stream_id, id_msg, end_stream=False)
@@ -281,7 +340,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
                                     asyncio.create_task(send_one_off_message(nei_ip, nei_port, msg))
 
-                                msg_switch = f"SWITCHED|{nei_ip}|{nei_port}|False\n".encode()
+                                    msg_switch = f"SWITCHED|{nei_ip}|{nei_port}|False\n".encode()
                                     self._quic.send_stream_data(self.stream_id, msg_switch, end_stream=False)
                                     self.transmit()
 
@@ -1417,6 +1476,48 @@ async def connect_to_lb():
                     except Exception as e:
                         print("[LB] Failed parsing UpdateArea:", e)
 
+                elif msg.startswith("ExpectPlayer"):
+                        try:
+                            # חיתוך ההודעה לפי '|' וניקוי רווחים מיותרים
+                            parts = [p.strip() for p in msg.split("|")]
+
+                            # מוודאים שיש לנו את כל 8 החלקים (0 עד 7)
+                            if len(parts) >= 8:
+                                p_id = parts[1]
+                                fake_id = parts[2]
+                                p_name = parts[3]
+                                px = float(parts[4])
+                                py = float(parts[5])
+                                php = int(parts[6])
+                                pinv_str = parts[7]
+
+                                inv_dict = {}
+                                if pinv_str and pinv_str != "None":
+                                    inv_items = pinv_str.split("-")
+                                    for i in range(INVENTORY_SIZE):
+                                        if i < len(inv_items):
+                                            w_type, ammo = inv_items[i].split(",")
+                                            inv_dict[i] = {"type": w_type, "ammo": int(ammo)}
+                                        else:
+                                            inv_dict[i] = {"type": "none", "ammo": 0}
+                                else:
+                                    inv_dict = {int(i): {"type": "none", "ammo": 0} for i in range(INVENTORY_SIZE)}
+
+                                # שומרים במילון תחת ה-fake_id
+                                state.expected_players[fake_id] = {
+                                    "id": p_id,
+                                    "x": px,
+                                    "y": py,
+                                    "hp": php,
+                                    "inv": inv_dict
+                                }
+
+                                print(f"[LB] Expected player {p_name} (Fake ID: {fake_id}) is ready to transfer.")
+
+                        except Exception as e:
+                            print(f"[LB] Error parsing ExpectPlayer: {e}")
+                    #expected_players = {} #fake_id -> {id,x,y,hp,inv}
+                    #ExpectPlayer | {p_id} | {fake_id} | {p_name} | {px} | {py} | {php} | {pinv}
                 elif msg.startswith("GET-MONSTER"):
                     try:
                         parts = msg.split("|")[1:]
