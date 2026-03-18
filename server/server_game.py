@@ -1491,19 +1491,30 @@ async def connect_to_lb():
                                 php = int(parts[6])
                                 pinv_str = parts[7]
 
-                                inv_dict = {}
-                                if pinv_str and pinv_str != "None":
-                                    inv_items = pinv_str.split("-")
-                                    for i in range(INVENTORY_SIZE):
-                                        if i < len(inv_items):
-                                            w_type, ammo = inv_items[i].split(",")
-                                            inv_dict[i] = {"type": w_type, "ammo": int(ammo)}
-                                        else:
-                                            inv_dict[i] = {"type": "none", "ammo": 0}
-                                else:
-                                    inv_dict = {int(i): {"type": "none", "ammo": 0} for i in range(INVENTORY_SIZE)}
+                                # 1. קודם כל מאתחלים תיק ריק כברירת מחדל
+                                inv_dict = {int(i): {"type": "none", "ammo": 0} for i in range(INVENTORY_SIZE)}
 
-                                # שומרים במילון תחת ה-fake_id
+                                # 2. בודקים אם יש נתונים אמיתיים (מוודאים שזה לא "Empty" או "None")
+                                if pinv_str and pinv_str not in ("None", "Empty"):
+                                    # הלוגין סרבר מפריד פריטים עם נקודה-פסיק
+                                    items_list = pinv_str.split(";")
+                                    for item_str in items_list:
+                                        if not item_str:
+                                            continue
+
+                                        try:
+                                            # הלוגין סרבר שולח 3 נתונים: סלוט, סוג, תחמושת
+                                            slot_str, w_type, ammo_str = item_str.split(",")
+                                            slot = int(slot_str)
+
+                                            # מכניסים לתיק רק אם הסלוט חוקי (0 עד 4)
+                                            if 0 <= slot < INVENTORY_SIZE:
+                                                inv_dict[slot] = {"type": w_type, "ammo": int(ammo_str)}
+                                        except ValueError:
+                                            # אם יש פריט משובש מהדאטה-בייס, נתעלם ממנו כדי שהשרת לא יקרוס
+                                            pass
+
+                                # 3. שומרים במילון תחת ה-fake_id
                                 state.expected_players[fake_id] = {
                                     "id": p_id,
                                     "x": px,
