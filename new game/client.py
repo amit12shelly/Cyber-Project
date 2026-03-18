@@ -799,9 +799,11 @@ def main():
                 inv_str_parts.append("none,0")
         proper_inv_str = "-".join(inv_str_parts)
 
-        # שולחים לשרת את הודעת ההתחברות עם התיק המסודר
+        potions_names = [p.name for p in inventory]
+        potions_str = ",".join(potions_names) if potions_names else "None"
+
         outgoing_messages_host.put(
-            f"Connected|{MY_ID}|{player_name}|{player.x},{player.y}|{player.hp}|{proper_inv_str}")
+            f"Connected|{MY_ID}|{player_name}|{player.x},{player.y}|{player.hp}|{proper_inv_str}|{potions_str}")
         outgoing_messages_host.put(f"UPDATE|{player.x},{player.y}")
 
         running = True

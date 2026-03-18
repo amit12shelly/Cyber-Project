@@ -178,6 +178,16 @@ async def handle_gs_lifecycle(reader, writer):
                 await divide_map()
 
 
+            elif parts[0] == "SAVE":
+                if len(parts) >= 6:
+                    print(f"[*] Received save request for RealID: {parts[1]}")
+                    save_msg = "|".join(parts)
+
+                    asyncio.create_task(forward_save_to_login(save_msg))
+                else:
+                    print("[!] GS sent malformed SAVE message")
+
+
             elif parts[0] == "Server heartbeat":
                 gs_id = int(parts[1])
                 cpu_load = float(parts[2])
@@ -225,15 +235,6 @@ async def handle_gs_lifecycle(reader, writer):
                                 for id_del in to_delete: del weapons_manager.state.map_weapons[id_del]
 
 
-                        elif parts[0] == "SAVE":
-                            if len(parts) >= 6:
-                                print(f"[*] Received save request for RealID: {parts[1]}")
-                                save_msg = "|".join(parts)
-
-                                asyncio.create_task(forward_save_to_login(save_msg))
-                            else:
-                                print("[!] GS sent malformed SAVE message")
-
                         elif cmd_type == "chat":
                             if "," in data:
                                 msg, sender = data.split(",", 1)
@@ -253,13 +254,13 @@ async def handle_gs_lifecycle(reader, writer):
                         await divide_map()
 
             elif parts[0] == "RegisterPlayer":
-                if len(parts) < 8:
-                    writer.write(b"Error|Invalid Format\n")
+                if len(parts) < 9:
+                    writer.write(b"Error|Invalid Format (Missing Potions)\n")
                     await writer.drain()
                     continue
 
-                real_id, fake_id, p_name, px, py, php, pinv = parts[1:8]
-                px_int = int(px)
+                real_id, fake_id, p_name, px, py, php, pinv, ppotions = parts[1:9]
+                px_int = int(float(px))
 
                 target_gs = None
                 for s in servers:
@@ -268,12 +269,11 @@ async def handle_gs_lifecycle(reader, writer):
                         break
 
                 if target_gs:
-                    expect_msg = f"ExpectPlayer|{real_id}|{fake_id}|{p_name}|{px}|{py}|{php}|{pinv}\n"
+                    expect_msg = f"ExpectPlayer|{real_id}|{fake_id}|{p_name}|{px}|{py}|{php}|{pinv}|{ppotions}\n"
                     try:
                         target_gs.writer.write(expect_msg.encode())
                         await target_gs.writer.drain()
 
-                        # 3. החזרת תשובה ל-Login Server
                         response = f"BestServer|{target_gs.id}|{target_gs.ip}|{target_gs.port}\n"
                     except Exception as e:
                         print(f"[!] Failed to notify GS-{target_gs.id}: {e}")

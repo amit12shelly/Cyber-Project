@@ -14,18 +14,28 @@ LB_PORT = 8080
 
 def parse_inventory_to_dict(inv_str):
     inventory = {}
-    if not inv_str or inv_str == "Empty" or inv_str == "none":
+    # בדיקה אם המחרוזת ריקה או "none"
+    if not inv_str or inv_str in ["Empty", "none", ""]:
         return inventory
 
     try:
-        slots = inv_str.split(";")
-        for s in slots:
-            if "," in s:
-                slot_id, item_type, ammo = s.split(",")
-                inventory[slot_id] = {
-                    "type": item_type,
-                    "ammo": int(ammo)
-                }
+        items = inv_str.split(";")
+
+        for slot_id, item_data in enumerate(items):
+            if "," in item_data:
+                # פיצול לסוג וכמות
+                parts = item_data.split(",")
+                if len(parts) == 2:
+                    item_type, ammo = parts
+
+                    # דילוג על סלוטים ריקים
+                    if item_type == "none":
+                        continue
+
+                    inventory[slot_id] = {
+                        "type": item_type,
+                        "ammo": int(ammo)
+                    }
     except Exception as e:
         print(f"[!] Error parsing inventory string: {e}")
 
@@ -43,13 +53,26 @@ async def handle_internal_lb(reader, writer):
 
         if parts[0] == "SAVE" and len(parts) >= 6:
             real_id = parts[1]
+            inventory_dict = parse_inventory_to_dict(parts[5])
+
+            if len(parts) > 6:
+                potions_str = parts[6]
+                if potions_str and potions_str not in ("None", "Empty", ""):
+                    potions_list = potions_str.split(",")
+                    for i, p_type in enumerate(potions_list):
+                        slot_id = 5 + i
+                        if slot_id <= 10:  # מגבלה טכנית לסלוטים
+                            inventory_dict[slot_id] = {
+                                "type": p_type,
+                                "ammo": 1  # לשיקוי בודד תמיד יש כמות 1
+                            }
 
             state_to_save = {
                 "player_id": real_id,
                 "x": float(parts[2]),
                 "y": float(parts[3]),
                 "hp": int(parts[4]),
-                "inventory": parse_inventory_to_dict(parts[5])
+                "inventory": inventory_dict
             }
 
             try:
@@ -65,11 +88,11 @@ async def handle_internal_lb(reader, writer):
         await writer.wait_closed()
 
 
-async def register_player_on_lb(real_id, fake_id, username, x, y, hp, inv_str):
+async def register_player_on_lb(real_id, fake_id, username, x, y, hp, inv_str, potions_str):
     try:
         reader, writer = await asyncio.open_connection(LB_IP, LB_PORT)
 
-        query = f"RegisterPlayer|{real_id}|{fake_id}|{username}|{x}|{y}|{hp}|{inv_str}\n"
+        query = f"RegisterPlayer|{real_id}|{fake_id}|{username}|{x}|{y}|{hp}|{inv_str}|{potions_str}\n"
         writer.write(query.encode())
         await writer.drain()
 
@@ -90,11 +113,14 @@ async def register_player_on_lb(real_id, fake_id, username, x, y, hp, inv_str):
 
 
 def serialize_inventory(inventory):
-    """הופך את המילון למחרוזת בפורמט: slot,type,ammo;slot,type,ammo"""
-    items = []
+    if not inventory:
+        return "Empty"
+
+    parts = []
     for slot, data in inventory.items():
-        items.append(f"{slot},{data['type']},{data['ammo']}")
-    return ";".join(items) if items else "Empty"
+        parts.append(f"{slot},{data['type']},{data['ammo']}")
+
+    return ";".join(parts) if parts else "Empty"
 
 
 def get_ssl_context():
@@ -138,12 +164,22 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                     real_id = database.login(username, password)
                     if real_id is not None:
                         player_data = database.load_player(real_id)
-                        inv_str = serialize_inventory(player_data['inventory'])
+
+                        # הפרדה: נשקים (0-4) ושיקויים (5-10)
+                        full_inventory = player_data['inventory']
+                        weapons_only = {k: v for k, v in full_inventory.items() if k <= 4}
+                        potions_only = [v['type'] for k, v in full_inventory.items() if k >= 5]
+
+                        inv_str = serialize_inventory(weapons_only)
+                        potions_str = ",".join(potions_only) if potions_only else "None"
+
                         fake_id = secrets.token_hex(16)
 
+                        # שליחה ל-LB עם הפרמטר החדש
                         gs_ip, gs_port = await register_player_on_lb(
                             real_id, fake_id, player_data['username'],
-                            player_data['x'], player_data['y'], player_data['hp'], inv_str
+                            player_data['x'], player_data['y'], player_data['hp'],
+                            inv_str, potions_str  # <--- הוספת potions_str
                         )
 
                         if gs_ip and gs_port:
