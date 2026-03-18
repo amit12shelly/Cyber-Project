@@ -364,7 +364,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                                     self.transmit()
 
                             else:
-                                # חצה לחלוטין
+                                # חצה לחלוטין.
                                 msg_switch = f"SWITCHED|{nei_ip}|{nei_port}|True\n".encode()
                                 self._quic.send_stream_data(self.stream_id, msg_switch, end_stream=False)
                                 self.transmit()
