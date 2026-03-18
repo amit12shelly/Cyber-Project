@@ -228,12 +228,12 @@ async def handle_gs_lifecycle(reader, writer):
                         await divide_map()
 
             elif parts[0] == "RegisterPlayer":
-                if len(parts) < 7:
+                if len(parts) < 8:
                     writer.write(b"Error|Invalid Format\n")
                     await writer.drain()
                     continue
 
-                p_id, p_name, px, py, php, pinv = parts[1:7]
+                real_id, fake_id, p_name, px, py, php, pinv = parts[1:8]
                 px_int = int(px)
 
                 # 1. מציאת השרת המתאים לפי מיקום X
@@ -244,7 +244,7 @@ async def handle_gs_lifecycle(reader, writer):
                         break
 
                 if target_gs:
-                    expect_msg = f"ExpectPlayer|{p_id}|{p_name}|{px}|{py}|{php}|{pinv}\n"
+                    expect_msg = f"ExpectPlayer|{real_id}|{fake_id}|{p_name}|{px}|{py}|{php}|{pinv}\n"
                     try:
                         target_gs.writer.write(expect_msg.encode())
                         await target_gs.writer.drain()
