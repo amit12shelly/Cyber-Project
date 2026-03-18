@@ -19,16 +19,15 @@ servers = []
 next_server_id = 0
 
 
-async def forward_save_to_login(save_msg):
+async def forward_save_to_login(message):
     try:
         reader, writer = await asyncio.open_connection(LOGIN_SERVER_IP, LOGIN_SERVER_PORT)
-        writer.write(f"{save_msg}\n".encode())
+        writer.write(f"{message}\n".encode())
         await writer.drain()
         writer.close()
         await writer.wait_closed()
-        print(f"[LB -> Login] Save data forwarded successfully.")
     except Exception as e:
-        print(f"[!] LB failed to forward save to login: {e}")
+        print(f"[!] LB failed to forward to login: {e}")
 
 
 def serialize_items(items_dict):
@@ -176,6 +175,16 @@ async def handle_gs_lifecycle(reader, writer):
 
                 next_server_id += 1
                 await divide_map()
+
+            elif parts[0] == "CONNECT":
+                if len(parts) >= 2:
+                    print(f"[*] Forwarding CONNECT for Player {parts[1]}")
+                    asyncio.create_task(forward_save_to_login(data))
+
+            elif parts[0] == "DISCONNECT":
+                if len(parts) >= 2:
+                    print(f"[*] Forwarding DISCONNECT for Player {parts[1]}")
+                    asyncio.create_task(forward_save_to_login(data))
 
 
             elif parts[0] == "SAVE":

@@ -2,15 +2,16 @@ import asyncio
 import ssl
 import database
 import secrets
+import time
 
 IP = "0.0.0.0"
 PORT = 8820
 INTERNAL_PORT = 8821
 
-
 LB_IP = "127.0.0.1"
 LB_PORT = 8080
 
+active_sessions = {}
 
 def parse_inventory_to_dict(inv_str):
     inventory = {}
@@ -43,6 +44,7 @@ def parse_inventory_to_dict(inv_str):
 
 
 async def handle_internal_lb(reader, writer):
+    global active_sessions
     try:
         data = await reader.read(4096)
         if not data:
@@ -51,8 +53,21 @@ async def handle_internal_lb(reader, writer):
         message = data.decode().strip()
         parts = message.split("|")
 
-        if parts[0] == "SAVE" and len(parts) >= 6:
-            real_id = parts[1]
+        if parts[0] == "CONNECT" and len(parts) >= 2:
+            real_id = int(parts[1])
+            if real_id in active_sessions:
+                active_sessions[real_id]["status"] = "CONNECTED"
+                print(f"[*] GS Confirmed: Player {real_id} is now fully connected.")
+
+        elif parts[0] == "DISCONNECT" and len(parts) >= 2:
+            real_id = int(parts[1])
+            active_sessions.pop(real_id, None)
+            print(f"[*] GS Confirmed: Player {real_id} logged out and lock removed.")
+
+        elif parts[0] == "SAVE" and len(parts) >= 6:
+            real_id = int(parts[1])
+            active_sessions.pop(real_id, None)
+            print(f"[*] GS Confirmed: Player {real_id} logged out and lock removed (SAVE).")
             inventory_dict = parse_inventory_to_dict(parts[5])
 
             if len(parts) > 6:
@@ -86,6 +101,23 @@ async def handle_internal_lb(reader, writer):
     finally:
         writer.close()
         await writer.wait_closed()
+
+
+async def cleanup_expired_sessions():
+    PENDING_TIMEOUT = 30
+    while True:
+        await asyncio.sleep(10)
+        now = time.time()
+        to_remove = []
+
+        for real_id, session in active_sessions.items():
+            if session["status"] == "PENDING":
+                if now - session["timestamp"] > PENDING_TIMEOUT:
+                    to_remove.append(real_id)
+
+        for real_id in to_remove:
+            active_sessions.pop(real_id, None)
+            print(f"[!] Cleanup: Removed expired PENDING session for ID {real_id}")
 
 
 async def register_player_on_lb(real_id, fake_id, username, x, y, hp, inv_str, potions_str):
@@ -162,78 +194,54 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
 
 
                 elif request_type == "LOGIN":
-
                     real_id = database.login(username, password)
 
                     if real_id is not None:
-
-                        player_data = database.load_player(real_id)
-
-                        # שליפת כל התיק
-
-                        full_inventory = player_data['inventory']
-
-                        # הפרדה: נשקים (0-4) ושיקויים (5-10) לטובת ה-LB
-
-                        weapons_only = {k: v for k, v in full_inventory.items() if k <= 4}
-
-                        potions_only = [v['type'] for k, v in full_inventory.items() if k >= 5]
-
-                        # כאן התיקון: אנחנו מכינים סטרינג מלא לקליינט, וסטרינג חלקי ל-LB
-
-                        inv_str_full = serialize_inventory(full_inventory)
-
-                        inv_str_lb = serialize_inventory(weapons_only)
-
-                        potions_str = ",".join(potions_only) if potions_only else "None"
-
-                        fake_id = secrets.token_hex(16)
-
-                        # שליחה ל-LB (שולחים מופרד)
-
-                        gs_ip, gs_port = await register_player_on_lb(
-
-                            real_id, fake_id, player_data['username'],
-
-                            player_data['x'], player_data['y'], player_data['hp'],
-
-                            inv_str_lb, potions_str
-
-                        )
-
-                        if gs_ip and gs_port:
-
-                            # תשובה לקליינט - שולחים את התיק המלא!
-
-                            reply = (
-
-                                f"LOGIN_SUCCESS|{fake_id}|"
-
-                                f"{player_data['username']}|{player_data['x']}|"
-
-                                f"{player_data['y']}|{player_data['hp']}|"
-
-                                f"{inv_str_full}|"
-
-                                f"{gs_ip}|{gs_port}"
-
-                            )
+                        if real_id in active_sessions:
+                            reply = "Account already in use"
+                            print(f"[!] User {username} (ID: {real_id}) attempted double login.")
 
                         else:
+                            active_sessions[real_id] = {
+                                "status": "PENDING",
+                                "timestamp": time.time()
+                            }
+                            player_data = database.load_player(real_id)
+                            full_inventory = player_data['inventory']
 
-                            reply = "Login Failed: No Game Server available"
+                            weapons_only = {k: v for k, v in full_inventory.items() if k <= 4}
+                            potions_only = [v['type'] for k, v in full_inventory.items() if k >= 5]
 
+                            inv_str_full = serialize_inventory(full_inventory)
+                            inv_str_lb = serialize_inventory(weapons_only)
+                            potions_str = ",".join(potions_only) if potions_only else "None"
+                            fake_id = secrets.token_hex(16)
 
+                            gs_ip, gs_port = await register_player_on_lb(
+                                real_id, fake_id, player_data['username'],
+                                player_data['x'], player_data['y'], player_data['hp'],
+                                inv_str_lb, potions_str
+                            )
 
+                            if gs_ip and gs_port:
+                                reply = (
+                                    f"LOGIN_SUCCESS|{fake_id}|"
+                                    f"{player_data['username']}|{player_data['x']}|"
+                                    f"{player_data['y']}|{player_data['hp']}|"
+                                    f"{inv_str_full}|"
+                                    f"{gs_ip}|{gs_port}"
+                                )
+                            else:
+                                active_sessions.pop(real_id, None)
+                                reply = "Login Failed: No Game Server available"
                     else:
-
-                        reply = "Login Failed"
+                        reply = "Username or password incorrect"
             else:
                 reply = "Error: Invalid Format"
         else:
             reply = "Error: Protocol Mismatch"
 
-        # שליחת התשובה
+
         writer.write(reply.encode())
         await writer.drain()
         print(f"[<] Sent to {addr}: {reply}")
@@ -268,7 +276,8 @@ async def main():
     async with client_server, internal_lb_server:
         await asyncio.gather(
             client_server.serve_forever(),
-            internal_lb_server.serve_forever()
+            internal_lb_server.serve_forever(),
+            cleanup_expired_sessions()
         )
 
 
