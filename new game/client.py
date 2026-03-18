@@ -1048,8 +1048,7 @@ def main():
                     chat_messages.append((f"<{display_name}> {parts[2]}", time.time()))
 
                 elif parts[0] == "SETID":
-                    if MY_ID == "":
-                        MY_ID = parts[1]
+                    MY_ID = parts[1]
 
                 elif parts[0] == "FPS" and is_host_msg:
                     server_fps = parts[1]
