@@ -1,7 +1,7 @@
 import asyncio
 import ssl
 import database
-
+import secrets
 
 IP = "0.0.0.0"
 PORT = 8820
@@ -10,11 +10,11 @@ LB_IP = "127.0.0.1"
 LB_PORT = 8080
 
 
-async def get_best_gs_from_lb(x, y):
+async def register_player_on_lb(real_id, fake_id, username, x, y, hp, inv_str):
     try:
         reader, writer = await asyncio.open_connection(LB_IP, LB_PORT)
 
-        query = f"GetServer|{x}|{y}\n"
+        query = f"RegisterPlayer|{real_id}|{fake_id}|{username}|{x}|{y}|{hp}|{inv_str}\n"
         writer.write(query.encode())
         await writer.drain()
 
@@ -24,8 +24,10 @@ async def get_best_gs_from_lb(x, y):
 
         msg = line.decode().strip()
         if msg.startswith("BestServer|"):
-            _, gs_ip, gs_port = msg.split("|")
-            return gs_ip, gs_port
+            # ה-LB מחזיר עכשיו: BestServer|gs_id|gs_ip|gs_port
+            parts = msg.split("|")
+            if len(parts) >= 4:
+                return parts[2], parts[3]
         return None, None
     except Exception as e:
         print(f"[!] Error querying LB: {e}")
@@ -78,21 +80,26 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                     reply = "Registration Success" if success else "Username Exists"
 
                 elif request_type == "LOGIN":
-                    player_id = database.login(username, password)
-                    if player_id is not None:
-                        player_data = database.load_player(player_id)
-                        gs_ip, gs_port = await get_best_gs_from_lb(player_data['x'], player_data['y'])
+                    real_id = database.login(username, password)
+                    if real_id is not None:
+                        player_data = database.load_player(real_id)
+                        inv_str = serialize_inventory(player_data['inventory'])
+                        fake_id = secrets.token_hex(16)
+
+                        gs_ip, gs_port = await register_player_on_lb(
+                            real_id, fake_id, player_data['username'],
+                            player_data['x'], player_data['y'], player_data['hp'], inv_str
+                        )
 
                         if gs_ip and gs_port:
-                            inv_str = serialize_inventory(player_data['inventory'])
-
-                            reply = (
-                                f"LOGIN_SUCCESS|{player_id}|"
-                                f"{player_data['username']}|{player_data['x']}|"
-                                f"{player_data['y']}|{player_data['hp']}|"
-                                f"{inv_str}|"
-                                f"{gs_ip}|{gs_port}"
-                            )
+                            if gs_ip and gs_port:
+                                reply = (
+                                    f"LOGIN_SUCCESS|{fake_id}|"
+                                    f"{player_data['username']}|{player_data['x']}|"
+                                    f"{player_data['y']}|{player_data['hp']}|"
+                                    f"{inv_str}|"
+                                    f"{gs_ip}|{gs_port}"
+                                )
                         else:
                             reply = "Login Failed: No Game Server available"
 

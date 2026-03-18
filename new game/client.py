@@ -729,6 +729,7 @@ def main():
         php = int(player_data.get("hp", 100))  # player hp
         player = Player(px, py, skill)
         player.hp = php
+        player_name = player_data.get("username", "Unknown")
 
         chat_font = pygame.font.SysFont("monospace", CHAT_FONT_SIZE)
         chat_open = False
@@ -737,7 +738,8 @@ def main():
         servers["host"] = Server(gs_ip, gs_port, True)
         start_quic_thread(servers["host"].ip, servers["host"].port)
 
-        outgoing_messages_host.put(f"Connected|{player.x},{player.y}|{player.hp}")
+        raw_inv = player_data.get("inventory", "Empty")
+        outgoing_messages_host.put(f"Connected|{MY_ID}|{player_name}|{player.x},{player.y}|{player.hp}|{raw_inv}")
         outgoing_messages_host.put(f"UPDATE|{player.x},{player.y}")
 
         weapon_images = {
@@ -764,9 +766,7 @@ def main():
         # ==========================================
         # אתחול ציוד ושיקויים מתוך player_data
         # ==========================================
-        raw_inv = player_data.get("inventory", "Empty")
         if raw_inv and raw_inv != "Empty":
-            # פירוק המחרוזת לפריטים בודדים
             items_list = raw_inv.split(";")
             for item_str in items_list:
                 if not item_str:
