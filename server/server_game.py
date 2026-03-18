@@ -117,7 +117,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
         print(data_str)
 
         # CONNECTED
-        client_id = ""
+        client_id = self.player_id
         # CONNECTED
         if data_str.startswith("Connected|"):
             try:
