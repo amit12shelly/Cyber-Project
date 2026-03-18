@@ -241,7 +241,8 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 return
 
             print("player connected!")
-
+            message = f"CONNECT|{state.player_real_id[client_id]}"
+            send_to_lb(message)
             # --- המשך ההתחברות והשליחה למשתמשים האחרים ---
             id_msg = f"SETID|{client_id}\n".encode()
             if self.stream_id is not None:
@@ -913,6 +914,9 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
         if self in state.active_clients:
             state.active_clients.remove(self)
+
+        message = f"DISCONNECT|{state.player_real_id[client_id]}"
+        send_to_lb(message)
 
         print(client_id, "disconnected")
 
