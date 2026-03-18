@@ -136,7 +136,9 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 if other_id == client_id:
                     continue
                 hp = state.players_hp.get(other_id, "100")
-                msg = f"UPDATE|{other_id}|{pos}|{hp}\n".encode()
+                inv = state.players_inventory.get(other_id, {})
+                has_weapon = any(v.get("type", "none") != "none" for v in inv.values())
+                msg = f"UPDATE|{other_id}|{pos}|{hp}|{'1' if has_weapon else '0'}\n".encode()
                 if self.stream_id is not None:
                     self._quic.send_stream_data(self.stream_id, msg, end_stream=False)
 
@@ -1187,9 +1189,9 @@ def broadcast_fps():
         client.transmit()
 
 skills_dict = {
-        "Speed Boost": Skill("Speed Boost", 10, 0, False),
+        "Speed Boost": Skill("Speed Boost", 7, 0, False),
         "Shield": Skill("Shield", 6, 0, False),
-        "Bombs": Skill("Bombs", 7, 0, False)
+        "Bombs": Skill("Bombs", 3, 0, False)
 }
 async def main():
     config = QuicConfiguration(

@@ -638,7 +638,7 @@ class Player:
 
 
 class RemotePlayer:
-    def __init__(self, x, y, hp, sprites, id):
+    def __init__(self, x, y, hp, sprites,weapon_sprites, id,bool):
         self.x = x
         self.y = y
         self.hp = hp
@@ -646,15 +646,18 @@ class RemotePlayer:
         self.old_y = y
         self.id = id
         self.direction = "down"
+        self.weopons = weapon_sprites
         self.sprites = sprites
         self.size = 64
 
-    def update_from_server(self, x, y, hp):
+    def update_from_server(self, x, y, hp,has_weapon):
         self.old_x = self.x
         self.old_y = self.y
         self.x = x
         self.y = y
         self.hp = hp
+        self.bool = has_weapon
+
         dx = self.x - self.old_x
         dy = self.y - self.old_y
         if abs(dx) > abs(dy):
@@ -663,7 +666,13 @@ class RemotePlayer:
             self.direction = "down" if dy > 0 else "up"
 
     def draw(self, screen, camera_x, camera_y, active_skills):
-        screen.blit(self.sprites[self.direction][0], (self.x - camera_x, self.y - camera_y))
+        if self.bool:
+            sprite = self.weopons[self.direction][0]  # פריים 0
+        else:
+            sprite = self.sprites[self.direction][0]  # פריים 0
+
+        screen.blit(sprite, (self.x - camera_x, self.y - camera_y))
+
         try:
             if active_skills[self.id].name == "Shield":
                 shield_center = (self.x - camera_x + 32, self.y - camera_y + 32)  # +32 to center on 64x64 sprite
@@ -889,9 +898,9 @@ def main():
     game_map = load_map("map.txt")
 
     skills_dict = {
-        "Speed Boost": Skill("Speed Boost", 10, 0, False),
+        "Speed Boost": Skill("Speed Boost", 7, 0, False),
         "Shield": Skill("Shield", 6, 0, False),
-        "Bombs": Skill("Bombs", 7, 0, False)
+        "Bombs": Skill("Bombs", 3, 0, False)
     }
     skill = skills_dict["Shield"]
     player = Player(128, 128, skill)
@@ -987,13 +996,17 @@ def main():
 
                 if event.key == pygame.K_r:
                     if len(inventory) > 0:
-                        item = inventory.pop(0)
+                        item = inventory[0]
                         if item.name == "Potion":
+                            if player.hp == 100:
+                                continue
+                            inventory.pop(0)
                             player.hp += UP_HP
                             if player.hp > 100:
                                 player.hp = 100
                             outgoing_messages.put(f"USE|{item.name}")
                         elif item.name == "Poison":
+                            inventory.pop(0)
                             outgoing_messages.put(f"USE|{item.name}|{player.x + 32},{player.y + 32}")
 
                 if event.key == pygame.K_z or event.key == pygame.K_x or event.key == pygame.K_c:
@@ -1081,14 +1094,15 @@ def main():
                 player_id = parts[1]
                 x, y = map(float, parts[2].split(","))
                 hp = int(parts[3])
+                has_weapon = bool(int(parts[4])) if len(parts) > 4 else False
                 if player_id == MY_ID:
                     player.hp = hp
                 else:
                     if player_id not in remote_players:
-                        remote_players[player_id] = RemotePlayer(x, y, hp, player.base_sprites, player_id)
+                        remote_players[player_id] = RemotePlayer(x, y, hp, player.base_sprites,player.weapon_sprites, player_id,has_weapon)
                         outgoing_messages.put(f"UPDATE|{player.x},{player.y}")
                     else:
-                        remote_players[player_id].update_from_server(x, y, hp)
+                        remote_players[player_id].update_from_server(x, y, hp,has_weapon)
 
             elif parts[0] == "REMOVE":
                 if len(parts) < 2:
