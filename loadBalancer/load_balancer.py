@@ -10,10 +10,25 @@ LB_IP = "0.0.0.0"
 LB_PORT = 8080
 HEARTBEAT_TIMEOUT = 15
 
+LOGIN_SERVER_IP = "127.0.0.1"
+LOGIN_SERVER_PORT = 8821
+
 MAP_NAME = "map.txt"
 
 servers = []
 next_server_id = 0
+
+
+async def forward_save_to_login(save_msg):
+    try:
+        reader, writer = await asyncio.open_connection(LOGIN_SERVER_IP, LOGIN_SERVER_PORT)
+        writer.write(f"{save_msg}\n".encode())
+        await writer.drain()
+        writer.close()
+        await writer.wait_closed()
+        print(f"[LB -> Login] Save data forwarded successfully.")
+    except Exception as e:
+        print(f"[!] LB failed to forward save to login: {e}")
 
 
 def serialize_items(items_dict):
@@ -210,18 +225,28 @@ async def handle_gs_lifecycle(reader, writer):
                                 for id_del in to_delete: del weapons_manager.state.map_weapons[id_del]
 
 
+                        elif parts[0] == "SAVE":
+                            if len(parts) >= 6:
+                                print(f"[*] Received save request for RealID: {parts[1]}")
+                                save_msg = "|".join(parts)
+
+                                asyncio.create_task(forward_save_to_login(save_msg))
+                            else:
+                                print("[!] GS sent malformed SAVE message")
+
                         elif cmd_type == "chat":
                             if "," in data:
                                 msg, sender = data.split(",", 1)
                                 chat_broadcast = f"ChatBroadcast|{sender}|{msg}\n"
                                 print(f"[*] Global Chat from {sender}: {msg}")
-                                # הפצה לכל השרתים המחוברים
+
                                 for s in servers:
-                                    try:
-                                        s.writer.write(chat_broadcast.encode())
-                                        asyncio.create_task(s.writer.drain())
-                                    except Exception as e:
-                                        print(f"[!] Failed to broadcast chat to GS-{s.id}: {e}")
+                                    if s != target_server:
+                                        try:
+                                            s.writer.write(chat_broadcast.encode())
+                                            asyncio.create_task(s.writer.drain())
+                                        except Exception as e:
+                                            print(f"[!] Failed to broadcast chat to GS-{s.id}: {e}")
 
                     # אם ה-CPU השתנה משמעותית -> מחלקים מחדש
                     if abs(old_cpu - cpu_load) > 100: #or len(parts) > 3 אם יש שינויים בדברים
@@ -236,7 +261,6 @@ async def handle_gs_lifecycle(reader, writer):
                 real_id, fake_id, p_name, px, py, php, pinv = parts[1:8]
                 px_int = int(px)
 
-                # 1. מציאת השרת המתאים לפי מיקום X
                 target_gs = None
                 for s in servers:
                     if s.get_x_min() <= px_int < s.get_x_max():

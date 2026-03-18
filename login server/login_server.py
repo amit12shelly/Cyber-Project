@@ -5,9 +5,64 @@ import secrets
 
 IP = "0.0.0.0"
 PORT = 8820
+INTERNAL_PORT = 8821
+
 
 LB_IP = "127.0.0.1"
 LB_PORT = 8080
+
+
+def parse_inventory_to_dict(inv_str):
+    inventory = {}
+    if not inv_str or inv_str == "Empty" or inv_str == "none":
+        return inventory
+
+    try:
+        slots = inv_str.split(";")
+        for s in slots:
+            if "," in s:
+                slot_id, item_type, ammo = s.split(",")
+                inventory[slot_id] = {
+                    "type": item_type,
+                    "ammo": int(ammo)
+                }
+    except Exception as e:
+        print(f"[!] Error parsing inventory string: {e}")
+
+    return inventory
+
+
+async def handle_internal_lb(reader, writer):
+    try:
+        data = await reader.read(4096)
+        if not data:
+            return
+
+        message = data.decode().strip()
+        parts = message.split("|")
+
+        if parts[0] == "SAVE" and len(parts) >= 6:
+            real_id = parts[1]
+
+            state_to_save = {
+                "player_id": real_id,
+                "x": float(parts[2]),
+                "y": float(parts[3]),
+                "hp": int(parts[4]),
+                "inventory": parse_inventory_to_dict(parts[5])
+            }
+
+            try:
+                database.save_player(state_to_save)
+                print(f"[*] Successfully saved player {real_id} via LB request.")
+            except Exception as e:
+                print(f"[!] database.save_player failed: {e}")
+
+    except Exception as e:
+        print(f"[!] Error handling internal LB message: {e}")
+    finally:
+        writer.close()
+        await writer.wait_closed()
 
 
 async def register_player_on_lb(real_id, fake_id, username, x, y, hp, inv_str):
@@ -139,12 +194,18 @@ async def main():
     if not ssl_context:
         return
 
-    server = await asyncio.start_server(handle_client, IP, PORT, ssl=ssl_context)
+    client_server = await asyncio.start_server(handle_client, IP, PORT, ssl=ssl_context)
+    internal_lb_server = await asyncio.start_server(handle_internal_lb, IP, INTERNAL_PORT)
 
-    print(f"--- Secure Login Server running on {IP}:{PORT} ---")
+    print(f"--- Login Server Running ---")
+    print(f"[*] External (SSL) on port {PORT}")
+    print(f"[*] Internal (LB) on port {INTERNAL_PORT}")
 
-    async with server:
-        await server.serve_forever()
+    async with client_server, internal_lb_server:
+        await asyncio.gather(
+            client_server.serve_forever(),
+            internal_lb_server.serve_forever()
+        )
 
 
 if __name__ == "__main__":
