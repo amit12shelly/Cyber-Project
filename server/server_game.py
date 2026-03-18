@@ -1566,8 +1566,22 @@ async def connect_to_lb():
 
                         except Exception as e:
                             print(f"[LB] Error parsing ExpectPlayer: {e}")
-                    #expected_players = {} #fake_id -> {id,x,y,hp,inv}
-                    #ExpectPlayer | {p_id} | {fake_id} | {p_name} | {px} | {py} | {php} | {pinv}
+                # expected_players = {} #fake_id -> {id,x,y,hp,inv}
+                # ExpectPlayer | {p_id} | {fake_id} | {p_name} | {px} | {py} | {php} | {pinv}
+                elif msg.startswith("CHAT"):
+                    try:
+                        client_name = msg.split("|")[1]
+                        player_msg = msg.split("|")[2]
+                        send_msg = f"CHAT|{client_name}|{player_msg}\n".encode()
+                        for client in list(state.active_clients):
+                            if client.stream_id is None:
+                                continue
+                            client._quic.send_stream_data(client.stream_id, send_msg, end_stream=False)
+                            client.transmit()
+                    except:
+                        print("Error while getting a chat msg from lb")
+
+
                 elif msg.startswith("GET-MONSTER"):
                     try:
                         parts = msg.split("|")[1:]
