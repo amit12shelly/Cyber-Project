@@ -1,7 +1,6 @@
 import asyncio
 import math
 import random
-
 import psutil
 import heapq
 import time
@@ -32,7 +31,7 @@ WEAPON_LIST = [["gun", 20, TILE_SIZE * 10],["rifle" ,10 , TILE_SIZE * 20],["rpg"
 WEAPON_NAMES = [w[0] for w in WEAPON_LIST]
 WEAPON_DAMAGE = [w[1] for w in WEAPON_LIST]
 WEAPON_RANGE = [w[2] for w in WEAPON_LIST]
-BOMB_WEAPON = ["bomb", 35, 15]
+BOMB_WEAPON = ["bomb", 35, 25]
 
 WEAPON_AMMO = {"gun": 30, "rifle": 20, "rpg": 5}
 MONSTER_CHANGE_PATH_EVERY_SET_SECONDS = 3
@@ -42,8 +41,9 @@ POTION_LIST = [["Potion", 40],["Poison",5]]
 counter = count()
 monsters_list = []
 SERVER_FPS = 0
-SKILL_COOL_TIME = 1
-
+SKILL_COOL_TIME = 12
+SPAWN_X = 128  # adjust to a safe open tile on your map
+SPAWN_Y = 128
 LB_PORT = 8080
 
 MY_IP = gs_and_lb_helper_functions.get_local_ip()
@@ -78,6 +78,8 @@ class GameState:
     server_id = None
     server_area_left = None
     server_area_right = None
+    left_common_zone = []
+    right_common_zone = []
     pending_lb_updates = []
 
     #game info
@@ -119,7 +121,6 @@ class EchoQuicProtocol(QuicConnectionProtocol):
         # CONNECTED
         client_id = self.player_id
         # CONNECTED
-        # CONNECTED
         if data_str.startswith("Connected|"):
             try:
                 parts = data_str.split("|")
@@ -127,7 +128,15 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 print("Error while splitting Connected command!")
                 self.disconnect()
                 return
-
+            # selected_skill = Skill("Speed Boost", 5, 0, False)
+            # state.players_skills[client_id] = selected_skill
+            # if len(parts) < 3:
+            #
+            #     state.players_pos[client_id] = "0,0"
+            #     state.players_hp[client_id] = "100"
+            # else:
+            #     state.players_pos[client_id] = parts[1]
+            #     state.players_hp[client_id] = parts[2]
             if len(parts) >= 7:
                 sent_id = parts[1]
                 client_name = parts[2]
@@ -242,7 +251,9 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 if other_id == client_id:
                     continue
                 hp = state.players_hp.get(other_id, "100")
-                msg = f"UPDATE|{other_id}|{pos}|{hp}\n".encode()
+                inv = state.players_inventory.get(other_id, {})
+                has_weapon = any(v.get("type", "none") != "none" for v in inv.values())
+                msg = f"UPDATE|{other_id}|{pos}|{hp}|{'1' if has_weapon else '0'}\n".encode()
                 if self.stream_id is not None:
                     self._quic.send_stream_data(self.stream_id, msg, end_stream=False)
 
@@ -258,17 +269,6 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
             self.broadcast_player(client_id, state.players_pos[client_id], state.players_hp[client_id], False)
             self.transmit()
-
-        elif data_str.startswith("ConnectedID"):
-            print(client_id, "connected from other server!")
-            try:
-                parts = data_str.split("|")
-            except:
-                print("Error while splitting Connected command!")
-                return
-            self.player_id = parts[1]
-            client_id = self.player_id
-            state.players_control[client_id] = (parts[2] == "True")
 
         # MOVEMENT
         elif data_str.startswith("UPDATE|"):
@@ -293,7 +293,6 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
             if check_movement(new_pos, state.players_pos[client_id], state.players_skills[self.player_id]):
                 state.players_pos[client_id] = new_pos
-                self.broadcast_player(client_id, new_pos, state.players_hp[client_id], False)
                 new_x = float(new_pos.split(",")[0])
 
                 if client_id not in state.players_control:
@@ -302,39 +301,111 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 if state.players_control[client_id]:
 
                     # ------------------ מעבר שמאלה ------------------
-                    if state.neighbor.get('left') is not None:
-                        if state.server_area_left is not None and new_x < float(state.server_area_left):
-                            nei_ip = state.neighbor['left'].split(':')[0]
-                            nei_port = state.neighbor['left'].split(':')[1]
+                    if state.server_area_left is not None and new_x < (float(state.server_area_left) + float(SCREEN_WIDTH/2)) and state.neighbor.get('left') is not None:
+                        #-----the player is in the common zone/outside the server responsibility-----
+                        nei_ip = state.neighbor['left'].split(':')[0]
+                        nei_port = state.neighbor['left'].split(':')[1]
 
-                            if new_x  > (float(state.server_area_right) - float(SCREEN_WIDTH)/2):
-                                # דגל חסימת הצפות! בודק אם טרם שלחנו
-                                if not getattr(self, 'spectator_sent_left', False):
-                                    self.spectator_sent_left = True  # מסמן ששלחנו
+                        if new_x  > (float(state.server_area_right) - float(SCREEN_WIDTH)/2):
+                            #-----the player is in the common zone-----
+                            if client_id not in state.left_common_zone:
+                                # -----It's for the firsts time!-----
+                                state.left_common_zone.apear(client_id)
 
-                                    # -------transfer client-------
-                                    inv = state.players_inventory[client_id]
-                                    inv_str = "-".join(
-                                        [f"{inv[i]['type']},{inv[i]['ammo']}" for i in range(INVENTORY_SIZE)])
-                                    skill = state.players_skills[client_id]
-                                    skill_str = f"{skill.name},{skill.duration_time},{skill.last_action_time},{skill.is_active}"
-                                    pos = state.players_pos[client_id]
-                                    hp = state.players_hp[client_id]
-                                    potions_list = state.players_potions[client_id]
-                                    potions = ",".join(potions_list) if potions_list else "None"
-                                    msg = f"TRANSFER_PLAYER|{client_id}|{pos}|{hp}|{potions}|{inv_str}|{skill_str}"
 
-                                    asyncio.create_task(send_one_off_message(nei_ip, nei_port, msg))
+                                # -------create a connection between the client and the other gs-------
 
-                                    msg_switch = f"SWITCHED|{nei_ip}|{nei_port}|False\n".encode()
-                                    self._quic.send_stream_data(self.stream_id, msg_switch, end_stream=False)
-                                    self.transmit()
-                            else:
-                                msg_switch = f"SWITCHED|{nei_ip}|{nei_port}|True\n".encode()
+                                real_id = state.player_real_id.get(client_id)
+                                p_name = state.player_name.get(client_id)
+                                pos = state.players_pos[client_id]
+                                px, py = pos.split(",")
+                                inv = state.players_inventory[client_id]
+                                inv_str = ";".join([f"{i},{inv[i]['type']},{inv[i]['ammo']}" for i in range(INVENTORY_SIZE)])
+                                hp = state.players_hp[client_id]
+                                potions_list = state.players_potions[client_id]
+                                potions = ",".join(potions_list) if potions_list else "None"
+                                skill = state.players_skills[client_id]
+                                skill_str = f"{skill.name},{skill.duration_time},{skill.last_action_time},{skill.is_active}"
+
+
+                                msg = f"TRANSFER_PLAYER|{real_id}|{client_id}|{p_name}|{px}|{py}|{hp}|{inv_str}|{potions}|{skill_str}"
+
+                                asyncio.create_task(send_one_off_message(nei_ip, nei_port, msg))
+
+                                msg_switch = f"SWITCHED|{nei_ip}|{nei_port}|False\n".encode()
                                 self._quic.send_stream_data(self.stream_id, msg_switch, end_stream=False)
                                 self.transmit()
+                                print(f"{p_name} has been connected to my left gs! (F)")
+                        else:
 
-                                #disconnect
+                            #-----outside the server responsibility-----
+                            if client_id in state.left_common_zone:
+                                state.left_common_zone.remove(client_id)
+                            msg_switch = f"SWITCHED|{nei_ip}|{nei_port}|True\n".encode()
+                            self._quic.send_stream_data(self.stream_id, msg_switch, end_stream=False)
+                            self.transmit()
+
+                            #disconnect
+                            if self in state.active_clients:
+                                state.active_clients.remove(self)
+                            state.players_pos.pop(client_id, None)
+                            state.players_hp.pop(client_id, None)
+                            state.players_inventory.pop(client_id, None)
+                            state.players_potions.pop(client_id, None)
+                            state.players_skills.pop(client_id, None)
+                            state.player_name.pop(client_id, None)
+                            state.players_control.pop(client_id, None)
+                            state.player_real_id.pop(client_id, None)
+
+                            if self in state.active_clients:
+                                state.active_clients.remove(self)
+                            print("out of border")
+                            return
+
+
+                    # ------------------ מעבר ימינה ------------------
+                    elif state.server_area_right is not None and new_x < (float(state.server_area_right) + float(SCREEN_WIDTH/2)) and state.neighbor.get('right') is not None:
+                        nei_ip = state.neighbor['right'].split(':')[0]
+                        nei_port = state.neighbor['right'].split(':')[1]
+
+                        if new_x  > (float(state.server_area_right) - float(SCREEN_WIDTH)/2):
+                            if client_id not in state.right_common_zone:
+                                # -----It's for the firsts time!-----
+                                state.right_common_zone.apear(client_id)
+
+                            # -------transfer client-------
+                            real_id = state.player_real_id.get(client_id)
+                            p_name = state.player_name.get(client_id)
+                            pos = state.players_pos[client_id]
+                            px, py = pos.split(",")
+                            inv = state.players_inventory[client_id]
+                            inv_str = ";".join([f"{i},{inv[i]['type']},{inv[i]['ammo']}" for i in range(INVENTORY_SIZE)])
+                            hp = state.players_hp[client_id]
+                            potions_list = state.players_potions[client_id]
+                            potions = ",".join(potions_list) if potions_list else "None"
+                            skill = state.players_skills[client_id]
+                            skill_str = f"{skill.name},{skill.duration_time},{skill.last_action_time},{skill.is_active}"
+
+                            msg = f"TRANSFER_PLAYER|{real_id}|{client_id}|{p_name}|{px}|{py}|{hp}|{inv_str}|{potions}|{skill_str}"
+
+                            asyncio.create_task(send_one_off_message(nei_ip, nei_port, msg))
+
+                            msg_switch = f"SWITCHED|{nei_ip}|{nei_port}|False\n".encode()
+                            self._quic.send_stream_data(self.stream_id, msg_switch, end_stream=False)
+                            self.transmit()
+                            print(f"{p_name} has been connected to my right gs! (F)")
+
+                        else:
+                            # חצה לחלוטין.
+                            if client_id in state.right_common_zone:
+                                state.right_common_zone.remove(client_id)
+                            msg_switch = f"SWITCHED|{nei_ip}|{nei_port}|True\n".encode()
+                            self._quic.send_stream_data(self.stream_id, msg_switch, end_stream=False)
+                            self.transmit()
+
+                            if self in state.active_clients:
+                                state.active_clients.remove(self)
+                                # disconnect
                                 if self in state.active_clients:
                                     state.active_clients.remove(self)
                                 state.players_pos.pop(client_id, None)
@@ -348,72 +419,14 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
                                 if self in state.active_clients:
                                     state.active_clients.remove(self)
-                                print("out of border")
-                        else:
-                            # מאפס את הדגל אם השחקן חזר פנימה לשרת המקורי
-                            self.spectator_sent_left = False
+                            print("out of border")
+                            return
 
-
-                    # ------------------ מעבר ימינה ------------------
-                    elif state.neighbor.get('right') is not None:
-                        if state.server_area_right is not None and new_x < float(state.server_area_right):
-                            nei_ip = state.neighbor['right'].split(':')[0]
-                            nei_port = state.neighbor['right'].split(':')[1]
-
-                            if new_x  < (float(state.server_area_right) + float(SCREEN_WIDTH)/2):
-                                # דגל חסימת הצפות! בודק אם טרם שלחנו
-                                if not getattr(self, 'spectator_sent_right', False):
-                                    self.spectator_sent_right = True  # מסמן ששלחנו
-
-                                    # -------transfer client-------
-                                    inv = state.players_inventory[client_id]
-                                    inv_str = "-".join(
-                                        [f"{inv[i]['type']},{inv[i]['ammo']}" for i in range(INVENTORY_SIZE)])
-                                    skill = state.players_skills[client_id]
-                                    skill_str = f"{skill.name},{skill.duration_time},{skill.last_action_time},{skill.is_active}"
-                                    pos = state.players_pos[client_id]
-                                    hp = state.players_hp[client_id]
-                                    potions_list = state.players_potions[client_id]
-                                    potions = ",".join(potions_list) if potions_list else "None"
-                                    msg = f"TRANSFER_PLAYER|{client_id}|{pos}|{hp}|{potions}|{inv_str}|{skill_str}"
-
-                                    asyncio.create_task(send_one_off_message(nei_ip, nei_port, msg))
-
-                                    msg_switch = f"SWITCHED|{nei_ip}|{nei_port}|False\n".encode()
-                                    self._quic.send_stream_data(self.stream_id, msg_switch, end_stream=False)
-                                    self.transmit()
-
-                            else:
-                                # חצה לחלוטין.
-                                msg_switch = f"SWITCHED|{nei_ip}|{nei_port}|True\n".encode()
-                                self._quic.send_stream_data(self.stream_id, msg_switch, end_stream=False)
-                                self.transmit()
-
-                                if self in state.active_clients:
-                                    state.active_clients.remove(self)
-                                    # disconnect
-                                    if self in state.active_clients:
-                                        state.active_clients.remove(self)
-                                    state.players_pos.pop(client_id, None)
-                                    state.players_hp.pop(client_id, None)
-                                    state.players_inventory.pop(client_id, None)
-                                    state.players_potions.pop(client_id, None)
-                                    state.players_skills.pop(client_id, None)
-                                    state.player_name.pop(client_id, None)
-                                    state.players_control.pop(client_id, None)
-                                    state.player_real_id.pop(client_id, None)
-
-                                    if self in state.active_clients:
-                                        state.active_clients.remove(self)
-                                print("out of border")
-
-                        else:
-                            # מאפס את הדגל אם השחקן חזר פנימה לשרת המקורי
-                            self.spectator_sent_right = False
-
+                    self.broadcast_player(client_id, new_pos, state.players_hp[client_id], False)
             else:
                 self.disconnect()
                 print("player has been kicked! movement problem")
+
         # ATTACK
         elif data_str.startswith("CHANGECONTROL|"):
             parts = data_str.split("|")
@@ -445,13 +458,13 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                     print("Error while splitting the pos in the ATTACK command!")
                     return
                 angle = float(parts[2])
-
-                center_x = float(x_str) + 32
-                center_y = float(y_str) + 32
+                angle_rad = math.radians(angle)
+                center_x = float(x_str) + 32 + math.cos(angle_rad) * 20
+                center_y = float(y_str) + 32 + math.sin(angle_rad) * 20 -8
 
                 state.active_bullets[new_id] = {
-                    "x": center_x + 28,
-                    "y": center_y - 8,
+                    "x": center_x,
+                    "y": center_y,
                     "angle": angle,
                 }
 
@@ -502,12 +515,13 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 print("Error while splitting the pos in the ATTACK command!")
                 return
             angle = float(parts[2])
-            center_x = float(x_str) + 32
-            center_y = float(y_str) + 32
+            angle_rad = math.radians(angle)
+            center_x = float(x_str) + 32 + math.cos(angle_rad) * 20
+            center_y = float(y_str) + 32 + math.sin(angle_rad) * 20 -8
 
             state.active_bullets[new_id] = {
-                "x": center_x + 28,
-                "y": center_y - 8,
+                "x": center_x,
+                "y": center_y,
                 "angle": angle,
             }
             print("shooting!")
@@ -733,6 +747,19 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             else:
                 print("Skill issue!")
 
+        # RESPAWN
+        elif data_str == "RESPAWN":
+            spawn_pos = f"{SPAWN_X},{SPAWN_Y}"
+            state.players_pos[client_id]       = spawn_pos
+            state.players_hp[client_id]        = 100
+            state.players_inventory[client_id] = {int(i): {"type": "none", "ammo": 0} for i in range(INVENTORY_SIZE)}
+            state.players_potions[client_id] = []
+            state.players_skills[client_id]    = Skill("Speed Boost", 5, 0, False)
+            if self.stream_id is not None:
+                self._quic.send_stream_data(self.stream_id, f"RESPAWNED|{spawn_pos}|100\n".encode(), end_stream=False)
+                self.transmit()
+            self.broadcast_player(client_id, spawn_pos, 100, False)
+
         # DISCONNECT
         elif data_str == "Disconnected":
             self.disconnect()
@@ -804,9 +831,19 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             client.transmit()
 
     def broadcast_player(self, sender_id: str, pos_str: str, hp, to_yourself: bool):
-        msg = f"UPDATE|{sender_id}|{pos_str}|{hp}\n".encode()
+        inv = state.players_inventory.get(sender_id, {})
+        has_weapon = any(v.get("type", "none") != "none" for v in inv.values())
+        msg = f"UPDATE|{sender_id}|{pos_str}|{hp}|{'1' if has_weapon else '0'}\n".encode()
+        notTo = []
+        if not state.players_control[sender_id]:
+            notTo.extend(state.right_common_zone)
+            notTo.extend(state.left_common_zone)
+
+
         for client in list(state.active_clients):
             if client == self and not to_yourself:
+                continue
+            if client in notTo:
                 continue
             if client.stream_id is None:
                 continue
@@ -974,8 +1011,25 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                     dropped += 1
                 inv_slot += 1
 
-            self.broadcast_remove(client_id)
+            # Send DEAD only to the dying player (keeps connection open for respawn)
+            dead_client = None
+            for client in state.active_clients:
+                if client._quic.host_cid.hex() == client_id:
+                    dead_client = client
+                    break
+            if dead_client and dead_client.stream_id is not None:
+                dead_client._quic.send_stream_data(dead_client.stream_id, b"DEAD\n", end_stream=False)
+                dead_client.transmit()
 
+            # Send REMOVE to everyone else
+            remove_msg = f"REMOVE|{client_id}\n".encode()
+            for client in list(state.active_clients):
+                if client is dead_client or client.stream_id is None:
+                    continue
+                client._quic.send_stream_data(client.stream_id, remove_msg, end_stream=False)
+                client.transmit()
+
+            # Wipe state but keep connection alive for RESPAWN/Disconnected
             if client_id in state.players_pos:
                 del state.players_pos[client_id]
             if client_id in state.players_hp:
@@ -1103,7 +1157,7 @@ async def monster_gun_tracking(bullet_id: int, gun_type: str, start_x: float, st
     y = start_y
     pos = f"{x},{y}"
 
-    msg_show = f"SHOW-BULLET|{pos}|{angle}|{bullet_id}\n".encode()
+    msg_show = f"SHOW-BULLET|{pos}|{angle}|{bullet_id}|bullet\n".encode()
     for client in list(state.active_clients):
         if client.stream_id is not None:
             client._quic.send_stream_data(client.stream_id, msg_show, end_stream=False)
@@ -1366,9 +1420,9 @@ def broadcast_fps():
         client.transmit()
 
 skills_dict = {
-        "Speed Boost": Skill("Speed Boost", 10, 0, False),
+        "Speed Boost": Skill("Speed Boost", 7, 0, False),
         "Shield": Skill("Shield", 6, 0, False),
-        "Bombs": Skill("Bombs", 7, 0, False)
+        "Bombs": Skill("Bombs", 3, 0, False)
 }
 
 
@@ -1868,29 +1922,45 @@ async def handle_neighbor_connection(reader, writer):
             parts = msg.split("|")
 
             if parts[0] == "TRANSFER_PLAYER":
-                client_id = parts[1]
-                pos = parts[2]
-                hp = int(parts[3])
-                potions_str = parts[4]
-                inv_str = parts[5]
-                skill_str = parts[6]
+                real_id = parts[1]
+                client_id = parts[2]
+                p_name = parts[3]
+                px = float(parts[4])
+                py = float(parts[5])
+                hp = int(parts[6])
+                inv_str = parts[7]
+                potions_str = parts[8]
+                skill_str = parts[9]
 
-                print(f"[Peer-to-Peer] Receiving player {client_id} from neighbor")
+                print(f"[Peer-to-Peer] Receiving player {p_name} ({client_id}) from neighbor")
 
-                state.players_pos[client_id] = pos
+                # שמירת נתוני זיהוי בסיסיים
+                state.player_real_id[client_id] = real_id
+                state.player_name[client_id] = p_name
+
+                state.players_pos[client_id] = f"{px},{py}"
                 state.players_hp[client_id] = hp
 
-                # התיקון הקטן כאן - מוודא שזה לא "None"
-                state.players_potions[client_id] = potions_str.split(",") if potions_str and potions_str != "None" else []
-
+                state.players_potions[client_id] = potions_str.split(
+                    ",") if potions_str and potions_str != "None" else []
                 state.players_control[client_id] = True
 
-                state.players_inventory[client_id] = {}
-                inv_items = inv_str.split("-")
-                for i in range(INVENTORY_SIZE):
-                    w_type, ammo = inv_items[i].split(",")
-                    state.players_inventory[client_id][i] = {"type": w_type, "ammo": int(ammo)}
+                # שחזור האינוונטרי מתוך הפורמט החדש (דומה לפענוח של ExpectPlayer)
+                state.players_inventory[client_id] = {i: {"type": "none", "ammo": 0} for i in range(INVENTORY_SIZE)}
+                if inv_str and inv_str.lower() not in ("none", "empty"):
+                    items_list = inv_str.split(";")
+                    for item_str in items_list:
+                        if not item_str:
+                            continue
+                        try:
+                            slot_str, w_type, ammo_str = item_str.split(",")
+                            slot = int(slot_str)
+                            if 0 <= slot < INVENTORY_SIZE:
+                                state.players_inventory[client_id][slot] = {"type": w_type, "ammo": int(ammo_str)}
+                        except ValueError:
+                            pass
 
+                # שחזור הסקיל
                 s_name, s_dur, s_last, s_act = skill_str.split(",")
                 state.players_skills[client_id] = Skill(s_name, float(s_dur), float(s_last), s_act == "True")
 
