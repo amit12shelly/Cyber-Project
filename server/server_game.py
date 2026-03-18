@@ -195,8 +195,8 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
                 # --- אתחול הנתונים לאחר שהקליינט עבר את הבדיקה בהצלחה ---
                 x_str = pos_str.split(",")[0]
-                if x_str < (state.server_area_right + SCREEN_WIDTH/2):
-                    if x_str > (state.server_area_left - SCREEN_WIDTH/2):
+                if float(x_str) < (float(state.server_area_right) + float(SCREEN_WIDTH)/2):
+                    if float(x_str) > (float(state.server_area_left) - float(SCREEN_WIDTH)/2):
                         state.players_pos[client_id] = pos_str
                         state.players_hp[client_id] = c_hp
                         state.players_inventory[client_id] = c_inv_dict
