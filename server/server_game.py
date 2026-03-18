@@ -182,16 +182,13 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
                     # מעדכנים את ה-ID מ-Fake ID ל-Real ID
                     real_id = expected_data["id"]
-                    self.player_id = real_id
-                    client_id = real_id
+                    state.player_real_id[client_id] = real_id
 
                     # מוחקים את השחקן מרשימת המצופים (כדי למנוע שימוש חוזר באותו Fake ID)
                     del state.expected_players[sent_id]
 
                 else:
-                    # הגעה ראשונית לשרת (ללא מעבר P2P) או כניסה רגילה מהלוגין
-                    self.player_id = sent_id
-                    client_id = sent_id
+                    return
 
                 # --- אתחול הנתונים לאחר שהקליינט עבר את הבדיקה בהצלחה ---
                 x_str = pos_str.split(",")[0]
