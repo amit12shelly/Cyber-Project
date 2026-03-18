@@ -739,8 +739,6 @@ def main():
         start_quic_thread(servers["host"].ip, servers["host"].port)
 
         raw_inv = player_data.get("inventory", "Empty")
-        outgoing_messages_host.put(f"Connected|{MY_ID}|{player_name}|{player.x},{player.y}|{player.hp}|{raw_inv}")
-        outgoing_messages_host.put(f"UPDATE|{player.x},{player.y}")
 
         weapon_images = {
             "rifle": pygame.transform.scale(pygame.image.load("img/leftWeapon1.png").convert_alpha(), (64, 64)),
@@ -793,7 +791,18 @@ def main():
                     elif item_type == "Poison":
                         inventory.append(Potion(player.x, player.y, poison_img, "Poison"))
         # ==========================================
+        inv_str_parts = []
+        for i in range(5):
+            if i < len(player.inventory):
+                inv_str_parts.append(f"{player.inventory[i].name},{player.inventory[i].ammo}")
+            else:
+                inv_str_parts.append("none,0")
+        proper_inv_str = "-".join(inv_str_parts)
 
+        # שולחים לשרת את הודעת ההתחברות עם התיק המסודר
+        outgoing_messages_host.put(
+            f"Connected|{MY_ID}|{player_name}|{player.x},{player.y}|{player.hp}|{proper_inv_str}")
+        outgoing_messages_host.put(f"UPDATE|{player.x},{player.y}")
 
         running = True
         while running:
