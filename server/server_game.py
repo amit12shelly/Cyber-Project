@@ -200,7 +200,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                         state.player_name[client_id] = client_name
 
                         state.players_control[client_id] = True
-                        state.players_potions[client_id] = 0
+                        state.players_potions[client_id] = []
                         state.players_skills[client_id] = Skill("Speed Boost", 5, 0, False)
                     else:
                         return
@@ -299,7 +299,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                                     skill_str = f"{skill.name},{skill.duration_time},{skill.last_action_time},{skill.is_active}"
                                     pos = state.players_pos[client_id]
                                     hp = state.players_hp[client_id]
-                                    potions = state.players_potions[client_id]
+                                    potions = ",".join(state.players_potions[client_id])
                                     msg = f"TRANSFER_PLAYER|{client_id}|{pos}|{hp}|{potions}|{inv_str}|{skill_str}"
 
                                     asyncio.create_task(send_one_off_message(nei_ip, nei_port, msg))
@@ -351,7 +351,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                                     skill_str = f"{skill.name},{skill.duration_time},{skill.last_action_time},{skill.is_active}"
                                     pos = state.players_pos[client_id]
                                     hp = state.players_hp[client_id]
-                                    potions = state.players_potions[client_id]
+                                    potions = ",".join(state.players_potions[client_id])
                                     msg = f"TRANSFER_PLAYER|{client_id}|{pos}|{hp}|{potions}|{inv_str}|{skill_str}"
 
                                     asyncio.create_task(send_one_off_message(nei_ip, nei_port, msg))
@@ -561,7 +561,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                     print(p_data["type"])
                     if p_data["type"] == pickup_type:
                         print("sup dog up the hp")
-                        state.players_potions[client_id] += 1
+                        state.players_potions[client_id].append(pickup_type)
                         found_potion_id = p_id
                         break
 
@@ -589,14 +589,14 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
             if client_id not in state.players_hp:
                 return
-            if state.players_potions[client_id] <= 0:
+            if item_name not in state.players_potions[client_id]:
                 return
+            state.players_potions[client_id].remove(item_name)
 
             if item_name == "Potion":
                 state.players_hp[client_id] += UP_HP
                 if state.players_hp[client_id] > 100:
                     state.players_hp[client_id] = 100
-                state.players_potions[client_id] -= 1
                 self.broadcast_player(client_id, state.players_pos[client_id], state.players_hp[client_id], True)
 
             elif item_name == "Poison":
@@ -604,7 +604,6 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                     return
                 pos = parts[2]
                 poison_x, poison_y = map(float, pos.split(","))
-                state.players_potions[client_id] -= 1
                 self.broadcast_poison(poison_x, poison_y)
 
                 async def poison_effect():
@@ -1812,7 +1811,7 @@ async def handle_neighbor_connection(reader, writer):
                 client_id = parts[1]
                 pos = parts[2]
                 hp = int(parts[3])
-                potions = int(parts[4])
+                potions_str = parts[4]
                 inv_str = parts[5]
                 skill_str = parts[6]
 
@@ -1820,7 +1819,7 @@ async def handle_neighbor_connection(reader, writer):
 
                 state.players_pos[client_id] = pos
                 state.players_hp[client_id] = hp
-                state.players_potions[client_id] = potions
+                state.players_potions[client_id] = potions_str.split(",") if potions_str else []
                 state.players_control[client_id] = True
 
                 state.players_inventory[client_id] = {}
