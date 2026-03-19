@@ -98,7 +98,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
         state.active_clients.add(self)
         self.stream_id = None
         self.recv_buffer = ""
-        self.player_id = self._quic.host_cid.hex()
+        self.player_id = ""
 
     def quic_event_received(self, event: QuicEvent) -> None:
         if isinstance(event, StreamDataReceived):
@@ -137,6 +137,8 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             #     state.players_hp[client_id] = parts[2]
             if len(parts) >= 8:
                 sent_id = parts[1]
+                self.player_id = sent_id
+                client_id = sent_id
                 client_name = parts[2]
                 pos_str = parts[3]
 
@@ -249,9 +251,6 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 message = f"CONNECT|{state.player_real_id[client_id]}"
                 asyncio.create_task(send_to_lb(message))
             # --- המשך ההתחברות והשליחה למשתמשים האחרים ---
-            id_msg = f"SETID|{client_id}\n".encode()
-            if self.stream_id is not None:
-                self._quic.send_stream_data(self.stream_id, id_msg, end_stream=False)
 
             for other_id, pos in state.players_pos.items():
                 if other_id == client_id:
@@ -378,6 +377,8 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                             return
 
 
+
+
                     # ------------------ מעבר ימינה ------------------
                     elif state.server_area_right is not None and new_x > (float(state.server_area_right) - float(SCREEN_WIDTH/2)) and state.neighbor.get('right') is not None:
                         nei_ip = state.neighbor['right'].split(':')[0]
@@ -457,6 +458,33 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                             state.right_common_zone.remove(client_id)
 
                     self.broadcast_player(client_id, new_pos, state.players_hp[client_id], False)
+                else:
+                    if (float(state.server_area_left) - float(SCREEN_WIDTH) / 2) < float(new_x) < (float(state.server_area_right) + float(SCREEN_WIDTH / 2)):
+                        pass #in the server area!
+                    else:
+                        #-----outside the server area-----
+                        self._quic.close()
+                        self.broadcast_remove(client_id)
+                        if self in state.active_clients:
+                            state.active_clients.remove(self)
+                            # disconnect
+                            if client_id in state.left_common_zone:
+                                state.left_common_zone.remove(client_id)
+                            elif client_id in state.right_common_zone:
+                                state.right_common_zone.remove(client_id)
+                            if self in state.active_clients:
+                                state.active_clients.remove(self)
+                            state.players_pos.pop(client_id, None)
+                            state.players_hp.pop(client_id, None)
+                            state.players_inventory.pop(client_id, None)
+                            state.players_potions.pop(client_id, None)
+                            state.players_skills.pop(client_id, None)
+                            state.player_name.pop(client_id, None)
+                            state.players_control.pop(client_id, None)
+                            state.player_real_id.pop(client_id, None)
+
+                            if self in state.active_clients:
+                                state.active_clients.remove(self)
             else:
                 self.disconnect()
                 print("player has been kicked! movement problem")
@@ -1726,6 +1754,27 @@ async def connect_to_lb():
                         potions = msg.split("|")[6]
                         await update_game_potions_from_lb(potions)
 
+                        players_list = state.left_common_zone
+                        for client_id in players_list:
+                            x = state.players_pos[client_id].split(",")[0]
+                            if x > (float(state.server_area_left) + float(SCREEN_WIDTH / 2)):
+                                state.left_common_zone.remove(client_id)
+                            if x < (float(state.server_area_left) - float(SCREEN_WIDTH) / 2):
+                                state.left_common_zone.remove(client_id)
+
+
+                        players_list = state.right_common_zone
+                        for client_id in players_list:
+                            x = state.players_pos[client_id].split(",")[0]
+                            if x > (float(state.server_area_right) - float(SCREEN_WIDTH / 2)):
+                                state.right_common_zone.remove(client_id)
+                            if x < (float(state.server_area_right) + float(SCREEN_WIDTH) / 2):
+                                state.right_common_zone.remove(client_id)
+
+
+
+
+
                     except Exception as e:
                         print("[LB] Failed parsing UpdateArea:", e)
 
@@ -2036,7 +2085,7 @@ async def handle_neighbor_connection(reader, writer):
 
             if parts[0] == "TRANSFER_PLAYER":
                 real_id = parts[1]
-                old_client_id = parts[2]  # זה ה-MY_ID שהקליינט ישלח כשהוא יתחבר!
+                old_client_id = parts[2]
                 p_name = parts[3]
                 px = float(parts[4])
                 py = float(parts[5])
@@ -2102,6 +2151,7 @@ async def main():
         is_client=False,
         alpn_protocols=["echo-protocol"],
         verify_mode=False,
+        idle_timeout=300.0,
     )
     config.load_cert_chain("cert.pem", "key.pem")
     print("Starting QUIC server on udp:0.0.0.0:4433")

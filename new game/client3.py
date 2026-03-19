@@ -16,7 +16,7 @@ TOLERANCE = 5
 UP_HP = 40
 MY_ID = ""
 incoming_messages = Queue()
-outgoing_messages = Queue()
+#outgoing_messages defined with BroadcastQueue
 import time
 
 WEAPON_AMMO = {"gun": 30, "rifle": 20, "rpg": 5}  # must match server
@@ -30,45 +30,63 @@ CHAT_PADDING = 6
 CHAT_MSG_HEIGHT = 22
 CHAT_X = 10
 CHAT_Y_BOTTOM_OFFSET = 120
+servers = []
 
 
-async def quic_network_loop(host, port):
+async def quic_network_loop(ip, port):
     config = QuicConfiguration(
         is_client=True,
         alpn_protocols=["echo-protocol"],
         verify_mode=False
     )
 
-    async with connect(host, port, configuration=config) as client:
-        stream_reader, stream_writer = await client.create_stream()
-        print(f"Connected to Game Server at {host}:{port}!")
+    outgoing_messages.add_server(ip, port)
 
-        async def read_from_server():
-            buffer = ""
-            while True:
-                data = await stream_reader.read(4096)
-                if not data:
-                    await asyncio.sleep(0.01)
-                    continue
+    try:
+        async with connect(ip, port, configuration=config) as client:
+            stream_reader, stream_writer = await client.create_stream()
+            print(f"Connected to Game Server at {ip}:{port}!")
 
-                buffer += data.decode()
+            connection_alive = True
 
-                while "\n" in buffer:
-                    msg, buffer = buffer.split("\n", 1)
-                    msg = msg.strip()
-                    if msg:
-                        incoming_messages.put(msg)
-
-        async def write_to_server():
-            while True:
+            async def read_from_server():
+                nonlocal connection_alive
+                buffer = ""
                 try:
-                    msg = outgoing_messages.get_nowait()
-                    stream_writer.write((msg + "\n").encode())
-                    await stream_writer.drain()
-                except queue.Empty:
-                    await asyncio.sleep(0.01)
+                    while connection_alive:
+                        data = await stream_reader.read(4096)
+                        if not data:
+                            break  # השרת ניתק אותנו - יוצאים מהלולאה במקום continue
 
-        await asyncio.gather(read_from_server(), write_to_server())
+                        buffer += data.decode()
+                        while "\n" in buffer:
+                            msg, buffer = buffer.split("\n", 1)
+                            msg = msg.strip()
+                            if msg:
+                                incoming_messages.put((ip, port, msg))
+                except Exception:
+                    pass
+                finally:
+                    connection_alive = False
+
+            async def write_to_server():
+                nonlocal connection_alive
+                while connection_alive:
+                    try:
+                        msg = outgoing_messages.get_nowait(ip, port)
+                        stream_writer.write((msg + "\n").encode())
+                        await stream_writer.drain()
+                    except queue.Empty:
+                        await asyncio.sleep(0.01)
+                    except Exception:
+                        break  # השרת ניתק אותנו ושגיאת כתיבה קפצה - יוצאים מהלולאה
+                connection_alive = False
+
+            await asyncio.gather(read_from_server(), write_to_server())
+    except Exception as e:
+        print(f"Quic connection error ({ip}:{port}):", e)
+    finally:
+        outgoing_messages.remove_server(ip, port)
 
 def start_quic_thread(ip, port):
     loop = asyncio.new_event_loop()
@@ -81,7 +99,34 @@ def start_quic_thread(ip, port):
             print("NETWORK THREAD ERROR:", e)
 
     threading.Thread(target=runner, args=(ip, port), daemon=True).start()
+class BroadcastQueue:
+    def __init__(self):
+        self.queues = {}
 
+    def add_server(self, ip, port):
+        if (ip, port) not in self.queues:
+            self.queues[(ip, port)] = queue.Queue()
+
+    def remove_server(self, ip, port):
+        if (ip, port) in self.queues:
+            del self.queues[(ip, port)]
+
+    def put(self, msg):
+        """שולח את ההודעה לכל השרתים המחוברים"""
+        for q in self.queues.values():
+            q.put(msg)
+
+    def put_to_specific(self, ip, port, msg):
+        """שולח הודעה רק לשרת אחד ספציפי"""
+        if (ip, port) in self.queues:
+            self.queues[(ip, port)].put(msg)
+
+    def get_nowait(self, ip, port):
+        """שולף הודעה ששייכת לשרת ספציפי"""
+        if (ip, port) in self.queues:
+            return self.queues[(ip, port)].get_nowait()
+        raise queue.Empty
+outgoing_messages = BroadcastQueue()
 # ---------------- MAP FUNCTIONS ---------------- #
 def load_map(filename):
     with open(filename, "r") as f:
@@ -233,6 +278,13 @@ def get_nearby_item(player, loot_items, radius=70):
         if distance <= radius:
             return item
     return None
+
+#-----------------SERVER CLASS-----------------#
+class Server:
+    def __init__(self, ip, port):
+        self.ip = ip
+        self.port = port
+
 
 # ---------------- PoisonEffect CLASS ---------------- #
 class PoisonEffect:
@@ -465,6 +517,7 @@ class Player:
 
         if self.auto_walk and not moved:
             outgoing_messages.put(f"UPDATE|{self.x},{self.y}")
+
             if self.wander_timer <= 0:
                 self.pick_random_direction()
             self.wander_timer -= 1
@@ -662,6 +715,7 @@ def draw_icons(screen, icons_lst, skill):
         pygame.draw.line(screen, color, (skill_bar_x + i, skill_bar_y),
                          (skill_bar_x + i, skill_bar_y + skill_bar_height))
 
+
 # ---------------- MAIN GAME LOOP ---------------- #
 
 def main():
@@ -670,6 +724,7 @@ def main():
     if player_data != None:
         gs_ip = player_data["gs_ip"]
         gs_port = player_data["gs_port"]
+        servers.append(Server(gs_ip, gs_port))
 
         global MY_ID
         MY_ID = player_data.get("id", "")
@@ -713,15 +768,15 @@ def main():
         php = int(player_data.get("hp", 100))  # player hp
         player = Player(px, py, skill)
         player.hp = php
+        player_name = player_data.get("username", "Unknown")
 
         chat_font = pygame.font.SysFont("monospace", CHAT_FONT_SIZE)
         chat_open = False
         chat_input = ""
         chat_messages = []
-        start_quic_thread(gs_ip, gs_port)
+        start_quic_thread(servers[0].ip, servers[0].port)
 
-        outgoing_messages.put(f"Connected|{player.x},{player.y}|{player.hp}")
-        outgoing_messages.put(f"UPDATE|{player.x},{player.y}")
+        raw_inv = player_data.get("inventory", "Empty")
 
         weapon_images = {
             "rifle": pygame.transform.scale(pygame.image.load("img/leftWeapon1.png").convert_alpha(), (64, 64)),
@@ -739,11 +794,72 @@ def main():
         loot_items = []
         poison_effects = []
         monsters = []
-        inventory = []
+        inventory = []  # הרשימה של השיקויים שלך (סלוטים 5-10)
         hp_items = []
         bullets = {}
         server_fps = 0
 
+        # ==========================================
+        # אתחול ציוד ושיקויים מתוך player_data
+        # ==========================================
+        # ==========================================
+        # אתחול ציוד ושיקויים מתוך player_data
+        # ==========================================
+        # ==========================================
+        # אתחול ציוד ושיקויים מתוך player_data
+        # ==========================================
+        if raw_inv and raw_inv != "Empty":
+            items_list = raw_inv.split(";")
+
+            temp_weapons = {}  # שומרים זמנית כדי לסדר לפי הסלוט
+
+            for item_str in items_list:
+                if not item_str:
+                    continue
+
+                slot_str, item_type, ammo_str = item_str.split(",")
+                slot = int(slot_str)
+                ammo = int(ammo_str)
+
+                if 0 <= slot <= 4:
+                    img_key = item_type.lower()
+                    if img_key in weapon_images:
+                        new_weapon = Item(player.x, player.y, weapon_images[img_key], "weapon", item_type)
+                        new_weapon.ammo = ammo
+                        temp_weapons[slot] = new_weapon  # שומרים לפי אינדקס
+                    else:
+                        print(f"[!] Warning: Unknown weapon '{item_type}' from DB")
+
+                elif 5 <= slot <= 10:
+                    if item_type == "Potion":
+                        inventory.append(Potion(player.x, player.y, potion_img, "Potion"))
+                    elif item_type == "Poison":
+                        inventory.append(Potion(player.x, player.y, poison_img, "Poison"))
+
+            # עכשיו נכניס אותם לרשימת השחקן לפי הסדר (0 עד 4)
+            for i in range(5):
+                if i in temp_weapons:
+                    player.inventory.append(temp_weapons[i])
+
+        # ==========================================
+        # בניית המחרוזת לשליחה לשרת המשחק - מחוץ ל-if!!
+        # השרת מצפה להפרדה בעזרת מקף (-) ולמילה none עבור סלוט ריק!
+        # ==========================================
+        inv_str_parts = []
+        for i in range(5):
+            if i < len(player.inventory):
+                inv_str_parts.append(f"{player.inventory[i].name},{player.inventory[i].ammo}")
+            else:
+                inv_str_parts.append("none,0")
+
+        final_inv_str = "-".join(inv_str_parts)
+
+        potions_names = [p.name for p in inventory]
+        potions_str = ",".join(potions_names) if potions_names else "None"
+
+        # השליחה עצמה
+        outgoing_messages.put(f"Connected|{MY_ID}|{player_name}|{player.x},{player.y}|{player.hp}|{final_inv_str}|{potions_str}|True")
+        outgoing_messages.put(f"UPDATE|{player.x},{player.y}")
 
         running = True
         while running:
@@ -872,11 +988,47 @@ def main():
                 player.move(keys, game_map, tile_size, skill)
 
             while not incoming_messages.empty():
-                msg = incoming_messages.get()
-                print(msg)
+                sender_ip, sender_port, msg = incoming_messages.get()
+                print(f"[{sender_ip}:{sender_port}] {msg}")
                 parts = msg.split("|")
                 if not parts:
                     continue
+                if parts[0] == "SWITCHED":
+                    if len(parts) < 4:
+                        continue
+
+                    new_ip = parts[1]
+                    new_port = int(parts[2])
+                    is_host_flag = parts[3]
+
+                    servers.append(Server(new_ip, new_port))
+
+                    outgoing_messages.add_server(new_ip, new_port)
+
+                    start_quic_thread(new_ip, new_port)
+                    print("connect to the other server")
+                    outgoing_messages.put_to_specific(new_ip, new_port,f"Connected|{MY_ID}|{player_name}|{player.x},{player.y}|{player.hp}|{final_inv_str}|{potions_str}|{is_host_flag}")
+                elif parts[0] == "CHANGECONTROL":
+                    if len(parts) < 4:
+                        continue
+
+                    target_ip = parts[1]
+                    target_port = int(parts[2])
+                    is_host_flag = parts[3]
+
+                    outgoing_messages.put_to_specific(target_ip, target_port, f"CHANGECONTROL|{is_host_flag}")
+
+                    server_to_remove = None
+                    for srv in servers:
+                        if srv.ip == target_ip or srv.port == target_port:
+                            server_to_remove = srv
+                            break
+
+                    if server_to_remove:
+                        servers.remove(server_to_remove)
+                        outgoing_messages.remove_server(server_to_remove.ip, server_to_remove.port)
+                        print(f"Disconnected from old server {server_to_remove.ip}:{server_to_remove.port}")
+
 
                 if parts[0] == "UPDATE":
                     if len(parts) < 4:
@@ -894,17 +1046,26 @@ def main():
                         else:
                             remote_players[player_id].update_from_server(x, y, hp)
 
+
                 elif parts[0] == "REMOVE":
                     if len(parts) < 2:
                         continue
                     player_id = parts[1]
-                    if player_id in remote_players:
+
+                    if player_id == MY_ID:
+                        is_active_server = any(srv.ip == sender_ip and srv.port == sender_port for srv in servers)
+
+                        if not is_active_server:
+                            print(f"Ignored REMOVE for MY_ID from disconnected server {sender_ip}:{sender_port}")
+                            continue
+                        else:
+                            pygame.quit()
+                            exit()
+
+
+                    elif player_id in remote_players:
+
                         del remote_players[player_id]
-                        if player_id == MY_ID:
-                            pygame.quit(); exit()
-                    else:
-                        if player_id == MY_ID:
-                            pygame.quit(); exit()
 
                 elif parts[0] == "SHOW-BULLET":
                     if len(parts) < 5:
@@ -986,8 +1147,7 @@ def main():
                     chat_messages.append((f"<{display_name}> {parts[2]}", time.time()))
 
                 elif parts[0] == "SETID":
-                    if MY_ID == "":
-                        MY_ID = parts[1]
+                    MY_ID = parts[1]
 
                 elif parts[0] == "FPS":
                     server_fps = parts[1]
