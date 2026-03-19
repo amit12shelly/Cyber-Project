@@ -54,17 +54,29 @@ async def handle_internal_lb(reader, writer):
         parts = message.split("|")
 
         if parts[0] == "CONNECT" and len(parts) >= 2:
+            if parts[1] == "None" or not parts[1].isdigit():
+                print(f"[!] Warning: Received invalid ID: {parts[1]}")
+                return
+
             real_id = int(parts[1])
             if real_id in active_sessions:
                 active_sessions[real_id]["status"] = "CONNECTED"
                 print(f"[*] GS Confirmed: Player {real_id} is now fully connected.")
 
         elif parts[0] == "DISCONNECT" and len(parts) >= 2:
+            if parts[1] == "None" or not parts[1].isdigit():
+                print(f"[!] Warning: Received invalid ID: {parts[1]}")
+                return
+
             real_id = int(parts[1])
             active_sessions.pop(real_id, None)
             print(f"[*] GS Confirmed: Player {real_id} logged out and lock removed.")
 
         elif parts[0] == "SAVE" and len(parts) >= 6:
+            if parts[1] == "None" or not parts[1].isdigit():
+                print(f"[!] Warning: Received invalid ID: {parts[1]}")
+                return
+
             real_id = int(parts[1])
             active_sessions.pop(real_id, None)
             print(f"[*] GS Confirmed: Player {real_id} logged out and lock removed (SAVE).")
