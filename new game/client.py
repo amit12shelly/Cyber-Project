@@ -1016,13 +1016,29 @@ def main():
                     new_port = int(parts[2])
                     is_host_flag = parts[3]
 
+                    already_connected = any(srv.ip == new_ip and srv.port == new_port for srv in servers)
+                    if already_connected:
+                        print(f"Ignored SWITCHED: already connected to {new_ip}:{new_port}")
+                        continue
+                    # -----------------------------------------------------
+
                     servers.append(Server(new_ip, new_port))
-
                     outgoing_messages.add_server(new_ip, new_port)
-
                     start_quic_thread(new_ip, new_port)
                     print("connect to the other server")
-                    outgoing_messages.put_to_specific(new_ip, new_port,f"Connected|{MY_ID}|{player_name}|{player.x},{player.y}|{player.hp}|{final_inv_str}|{potions_str}|{is_host_flag}")
+
+                    current_inv_parts = []
+                    for i in range(5):
+                        if i < len(player.inventory):
+                            current_inv_parts.append(f"{player.inventory[i].name},{player.inventory[i].ammo}")
+                        else:
+                            current_inv_parts.append("none,0")
+                    current_inv_str = "-".join(current_inv_parts)
+
+                    current_potions_names = [p.name for p in inventory]
+                    current_potions_str = ",".join(current_potions_names) if current_potions_names else "None"
+
+                    outgoing_messages.put_to_specific(new_ip, new_port,f"Connected|{MY_ID}|{player_name}|{player.x},{player.y}|{player.hp}|{current_inv_str}|{current_potions_str}|{is_host_flag}")
                 elif parts[0] == "CHANGECONTROL":
                     if len(parts) < 4:
                         continue
@@ -1186,15 +1202,19 @@ def main():
                     elif parts[2] == "Poison":
                         hp_items.append(Potion(x_potion, y_potion, poison_img, "Poison"))
 
+
                 elif parts[0] == "SKILL":
                     player_id = parts[1]
                     player_skill = parts[2]
                     is_active = parts[3]
+
                     if is_active == "True":
                         active_skills[player_id] = skills_dict[player_skill]
                     else:
-                        del active_skills[player_id]
-                    print(active_skills)
+                        if player_id in active_skills:
+                            del active_skills[player_id]
+
+
                 elif parts[0] == "POISON":
                     pos = parts[1]
                     x, y = map(float, pos.split(","))
