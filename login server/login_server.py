@@ -51,7 +51,7 @@ async def handle_internal_lb(reader, writer):
             return
 
         message = data.decode().strip()
-        parts = message.split("|")
+        parts = message.split("|")#
 
         if parts[0] == "CONNECT" and len(parts) >= 2:
             if parts[1] == "None" or not parts[1].isdigit():
