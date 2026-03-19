@@ -1685,92 +1685,28 @@ async def update_game_potions_from_lb(potions_string):
             if client.stream_id is not None:
                 client._quic.send_stream_data(client.stream_id, clients_msg, end_stream=False)
                 client.transmit()
+
+
 async def update_server_area_from_lb():
-    for client in state.active_clients:
+    # עוטפים ב-list() כדי למנוע שגיאת קריסה במחיקה מתוך הסט
+    for client in list(state.active_clients):
         client_id = client.player_id
+
+        # מוודאים שהשחקן קיים כדי למנוע שגיאות
+        if client_id not in state.players_pos:
+            continue
+
         new_x = float(state.players_pos[client_id].split(",")[0])
-        if state.players_control[client_id]:
+
+        if state.players_control.get(client_id, False):
 
             # ------------------ מעבר שמאלה ------------------
-            if state.server_area_left is not None and new_x < (float(state.server_area_left) + float(SCREEN_WIDTH / 2)) and state.neighbor.get('left') is not None:
-                # -----the player is in the common zone/outside the server responsibility-----
+            if state.server_area_left is not None and new_x < (
+                    float(state.server_area_left) + float(SCREEN_WIDTH / 2)) and state.neighbor.get('left') is not None:
                 nei_ip = state.neighbor['left'].split(':')[0]
                 nei_port = state.neighbor['left'].split(':')[1]
-                if new_x > (float(state.server_area_left) - float(SCREEN_WIDTH) / 2):
-                    # -----the player is in the common zone-----
-                    # -------create a connection between the client and the other gs-------
 
-                    real_id = state.player_real_id.get(client_id)
-                    p_name = state.player_name.get(client_id)
-                    pos = state.players_pos[client_id]
-                    px, py = pos.split(",")
-                    inv = state.players_inventory[client_id]
-                    inv_str = ";".join([f"{i},{inv[i]['type']},{inv[i]['ammo']}" for i in range(INVENTORY_SIZE)])
-                    hp = state.players_hp[client_id]
-                    potions_list = state.players_potions[client_id]
-                    potions = ",".join(potions_list) if potions_list else "None"
-                    skill = state.players_skills[client_id]
-                    skill_str = f"{skill.name},{skill.duration_time},{skill.last_action_time},{skill.is_active}"
-
-                    msg = f"TRANSFER_PLAYER|{real_id}|{client_id}|{p_name}|{px}|{py}|{hp}|{inv_str}|{potions}|{skill_str}"
-
-                    # עוטפים את השליחה כדי לוודא שקודם השרת מתעדכן, ורק אז הקליינט מקבל את הפקודה לעבור!
-                    async def safe_transfer():
-                        await send_one_off_message(nei_ip, nei_port, msg)
-                        msg_switch = f"SWITCHED|{nei_ip}|{nei_port}|False\n".encode()
-                        if client.stream_id is not None:
-                            client._quic.send_stream_data(client.stream_id, msg_switch, end_stream=False)
-                            client.transmit()
-                        print(f"{p_name} has been asked to switch to {nei_ip}:{nei_port}")
-
-                    asyncio.create_task(safe_transfer())
-                    if client_id not in state.left_common_zone:
-                        # -----It's for the firsts time!-----
-                        state.left_common_zone.append(client_id)
-
-                else:
-
-                    # -----outside the server responsibility-----
-                    if client_id in state.left_common_zone:
-                        state.left_common_zone.remove(client_id)
-
-                    msg_switch = f"CHANGECONTROL|{nei_ip}|{nei_port}|True\n".encode()
-                    client._quic.send_stream_data(client.stream_id, msg_switch, end_stream=False)
-                    client.transmit()
-
-                    # disconnect
-                    if client_id in state.left_common_zone:
-                        state.left_common_zone.remove(client_id)
-                    elif client_id in state.right_common_zone:
-                        state.right_common_zone.remove(client_id)
-                    client._quic.close()
-                    client.broadcast_remove(client_id)
-                    state.players_pos.pop(client_id, None)
-                    state.players_hp.pop(client_id, None)
-                    state.players_inventory.pop(client_id, None)
-                    state.players_potions.pop(client_id, None)
-                    state.players_skills.pop(client_id, None)
-                    state.player_name.pop(client_id, None)
-                    state.players_control.pop(client_id, None)
-                    state.player_real_id.pop(client_id, None)
-
-                    if client in state.active_clients:
-                        state.active_clients.remove(client)
-
-                    print("out of new border")
-                    return
-
-
-
-
-            # ------------------ מעבר ימינה ------------------
-            elif state.server_area_right is not None and new_x > (
-                    float(state.server_area_right) - float(SCREEN_WIDTH / 2)) and state.neighbor.get('right') is not None:
-                nei_ip = state.neighbor['right'].split(':')[0]
-                nei_port = state.neighbor['right'].split(':')[1]
-
-                # -------create a connection between the client and the other gs-------
-
+                # הוצאנו את בניית פקודת ההעברה החוצה שיהיה זמין לכל התרחישים
                 real_id = state.player_real_id.get(client_id)
                 p_name = state.player_name.get(client_id)
                 pos = state.players_pos[client_id]
@@ -1778,14 +1714,13 @@ async def update_server_area_from_lb():
                 inv = state.players_inventory[client_id]
                 inv_str = ";".join([f"{i},{inv[i]['type']},{inv[i]['ammo']}" for i in range(INVENTORY_SIZE)])
                 hp = state.players_hp[client_id]
-                potions_list = state.players_potions[client_id]
+                potions_list = state.players_potions.get(client_id, [])
                 potions = ",".join(potions_list) if potions_list else "None"
                 skill = state.players_skills[client_id]
                 skill_str = f"{skill.name},{skill.duration_time},{skill.last_action_time},{skill.is_active}"
 
                 msg = f"TRANSFER_PLAYER|{real_id}|{client_id}|{p_name}|{px}|{py}|{hp}|{inv_str}|{potions}|{skill_str}"
 
-                # עוטפים את השליחה כדי לוודא שקודם השרת מתעדכן, ורק אז הקליינט מקבל את הפקודה לעבור!
                 async def safe_transfer():
                     await send_one_off_message(nei_ip, nei_port, msg)
                     msg_switch = f"SWITCHED|{nei_ip}|{nei_port}|False\n".encode()
@@ -1794,68 +1729,35 @@ async def update_server_area_from_lb():
                         client.transmit()
                     print(f"{p_name} has been asked to switch to {nei_ip}:{nei_port}")
 
-                asyncio.create_task(safe_transfer())
-
-                if new_x < (float(state.server_area_right) + float(SCREEN_WIDTH) / 2):
-                    if client_id not in state.right_common_zone:
-                        # -----It's for the firsts time!-----
-                        state.right_common_zone.append(client_id)
+                if new_x > (float(state.server_area_left) - float(SCREEN_WIDTH) / 2):
+                    # -----the player is in the common zone-----
+                    asyncio.create_task(safe_transfer())
+                    if client_id not in state.left_common_zone:
+                        state.left_common_zone.append(client_id)
 
                 else:
-                    # חצה לחלוטין.
-                    if client_id in state.right_common_zone:
-                        state.right_common_zone.remove(client_id)
+                    # -----outside the server responsibility (טיפול פתאומי) -----
+                    await safe_transfer()  # ממתינים שהשליחה תסתיים!
+
+                    if client_id in state.left_common_zone:
+                        state.left_common_zone.remove(client_id)
+
                     msg_switch = f"CHANGECONTROL|{nei_ip}|{nei_port}|True\n".encode()
-                    client._quic.send_stream_data(client.stream_id, msg_switch, end_stream=False)
-                    client.transmit()
-                    client._quic.close()
-                    client.broadcast_remove(client_id)
-                    if client in state.active_clients:
-                        state.active_clients.remove(client)
-                        # disconnect
-                        if client_id in state.left_common_zone:
-                            state.left_common_zone.remove(client_id)
-                        elif client_id in state.right_common_zone:
-                            state.right_common_zone.remove(client_id)
-                        if client in state.active_clients:
-                            state.active_clients.remove(client)
-                        state.players_pos.pop(client_id, None)
-                        state.players_hp.pop(client_id, None)
-                        state.players_inventory.pop(client_id, None)
-                        state.players_potions.pop(client_id, None)
-                        state.players_skills.pop(client_id, None)
-                        state.player_name.pop(client_id, None)
-                        state.players_control.pop(client_id, None)
-                        state.player_real_id.pop(client_id, None)
+                    if client.stream_id is not None:
+                        client._quic.send_stream_data(client.stream_id, msg_switch, end_stream=False)
+                        client.transmit()
 
-                        if client in state.active_clients:
-                            state.active_clients.remove(client)
+                    await asyncio.sleep(0.15)  # השהייה קריטית למניעת ניתוק לפני סיום שליחה ברשת
 
-                    print("out of new border")
-                    return
-            else:
-                if client_id in state.left_common_zone:
-                    state.left_common_zone.remove(client_id)
-                elif client_id in state.right_common_zone:
-                    state.right_common_zone.remove(client_id)
-
-            client.broadcast_player(client_id, state.players_pos[client_id], state.players_hp[client_id], False)
-        else:
-            if (float(state.server_area_left) - float(SCREEN_WIDTH) / 2) < float(new_x) < (float(state.server_area_right) + float(SCREEN_WIDTH / 2)):
-                pass  # in the server area!
-            else:
-                # -----outside the server area-----
-                client._quic.close()
-                client.broadcast_remove(client_id)
-                if client in state.active_clients:
-                    state.active_clients.remove(client)
                     # disconnect
                     if client_id in state.left_common_zone:
                         state.left_common_zone.remove(client_id)
                     elif client_id in state.right_common_zone:
                         state.right_common_zone.remove(client_id)
-                    if client in state.active_clients:
-                        state.active_clients.remove(client)
+
+                    client._quic.close()
+                    client.broadcast_remove(client_id)
+
                     state.players_pos.pop(client_id, None)
                     state.players_hp.pop(client_id, None)
                     state.players_inventory.pop(client_id, None)
@@ -1867,6 +1769,116 @@ async def update_server_area_from_lb():
 
                     if client in state.active_clients:
                         state.active_clients.remove(client)
+
+                    print("out of new border (left)")
+                    continue
+
+
+            # ------------------ מעבר ימינה ------------------
+            elif state.server_area_right is not None and new_x > (
+                    float(state.server_area_right) - float(SCREEN_WIDTH / 2)) and state.neighbor.get(
+                    'right') is not None:
+                nei_ip = state.neighbor['right'].split(':')[0]
+                nei_port = state.neighbor['right'].split(':')[1]
+
+                real_id = state.player_real_id.get(client_id)
+                p_name = state.player_name.get(client_id)
+                pos = state.players_pos[client_id]
+                px, py = pos.split(",")
+                inv = state.players_inventory[client_id]
+                inv_str = ";".join([f"{i},{inv[i]['type']},{inv[i]['ammo']}" for i in range(INVENTORY_SIZE)])
+                hp = state.players_hp[client_id]
+                potions_list = state.players_potions.get(client_id, [])
+                potions = ",".join(potions_list) if potions_list else "None"
+                skill = state.players_skills[client_id]
+                skill_str = f"{skill.name},{skill.duration_time},{skill.last_action_time},{skill.is_active}"
+
+                msg = f"TRANSFER_PLAYER|{real_id}|{client_id}|{p_name}|{px}|{py}|{hp}|{inv_str}|{potions}|{skill_str}"
+
+                async def safe_transfer():
+                    await send_one_off_message(nei_ip, nei_port, msg)
+                    msg_switch = f"SWITCHED|{nei_ip}|{nei_port}|False\n".encode()
+                    if client.stream_id is not None:
+                        client._quic.send_stream_data(client.stream_id, msg_switch, end_stream=False)
+                        client.transmit()
+                    print(f"{p_name} has been asked to switch to {nei_ip}:{nei_port}")
+
+                if new_x < (float(state.server_area_right) + float(SCREEN_WIDTH) / 2):
+                    # -----the player is in the common zone-----
+                    asyncio.create_task(safe_transfer())
+                    if client_id not in state.right_common_zone:
+                        state.right_common_zone.append(client_id)
+
+                else:
+                    # חצה לחלוטין (טיפול פתאומי)
+                    await safe_transfer()  # ממתינים שהשליחה תסתיים!
+
+                    if client_id in state.right_common_zone:
+                        state.right_common_zone.remove(client_id)
+
+                    msg_switch = f"CHANGECONTROL|{nei_ip}|{nei_port}|True\n".encode()
+                    if client.stream_id is not None:
+                        client._quic.send_stream_data(client.stream_id, msg_switch, end_stream=False)
+                        client.transmit()
+
+                    await asyncio.sleep(0.15)  # השהייה קריטית למניעת ניתוק לפני סיום שליחה ברשת
+
+                    client._quic.close()
+                    client.broadcast_remove(client_id)
+
+                    # disconnect
+                    if client_id in state.left_common_zone:
+                        state.left_common_zone.remove(client_id)
+                    elif client_id in state.right_common_zone:
+                        state.right_common_zone.remove(client_id)
+
+                    state.players_pos.pop(client_id, None)
+                    state.players_hp.pop(client_id, None)
+                    state.players_inventory.pop(client_id, None)
+                    state.players_potions.pop(client_id, None)
+                    state.players_skills.pop(client_id, None)
+                    state.player_name.pop(client_id, None)
+                    state.players_control.pop(client_id, None)
+                    state.player_real_id.pop(client_id, None)
+
+                    if client in state.active_clients:
+                        state.active_clients.remove(client)
+
+                    print("out of new border (right)")
+                    continue
+            else:
+                if client_id in state.left_common_zone:
+                    state.left_common_zone.remove(client_id)
+                elif client_id in state.right_common_zone:
+                    state.right_common_zone.remove(client_id)
+
+            client.broadcast_player(client_id, state.players_pos[client_id], state.players_hp[client_id], False)
+        else:
+            if (float(state.server_area_left) - float(SCREEN_WIDTH) / 2) < float(new_x) < (
+                    float(state.server_area_right) + float(SCREEN_WIDTH / 2)):
+                pass  # in the server area!
+            else:
+                # -----outside the server area-----
+                client._quic.close()
+                client.broadcast_remove(client_id)
+
+                # disconnect
+                if client_id in state.left_common_zone:
+                    state.left_common_zone.remove(client_id)
+                elif client_id in state.right_common_zone:
+                    state.right_common_zone.remove(client_id)
+
+                state.players_pos.pop(client_id, None)
+                state.players_hp.pop(client_id, None)
+                state.players_inventory.pop(client_id, None)
+                state.players_potions.pop(client_id, None)
+                state.players_skills.pop(client_id, None)
+                state.player_name.pop(client_id, None)
+                state.players_control.pop(client_id, None)
+                state.player_real_id.pop(client_id, None)
+
+                if client in state.active_clients:
+                    state.active_clients.remove(client)
 
 
 async def connect_to_lb():
