@@ -1754,18 +1754,18 @@ async def connect_to_lb():
                         potions = msg.split("|")[6]
                         await update_game_potions_from_lb(potions)
 
-                        players_list = state.left_common_zone
+                        players_list = list(state.left_common_zone)
                         for client_id in players_list:
-                            x = state.players_pos[client_id].split(",")[0]
+                            x = float(state.players_pos[client_id].split(",")[0])
                             if x > (float(state.server_area_left) + float(SCREEN_WIDTH / 2)):
                                 state.left_common_zone.remove(client_id)
                             if x < (float(state.server_area_left) - float(SCREEN_WIDTH) / 2):
                                 state.left_common_zone.remove(client_id)
 
 
-                        players_list = state.right_common_zone
+                        players_list = list(state.right_common_zone)
                         for client_id in players_list:
-                            x = state.players_pos[client_id].split(",")[0]
+                            x = float(state.players_pos[client_id].split(",")[0])
                             if x > (float(state.server_area_right) - float(SCREEN_WIDTH / 2)):
                                 state.right_common_zone.remove(client_id)
                             if x < (float(state.server_area_right) + float(SCREEN_WIDTH) / 2):

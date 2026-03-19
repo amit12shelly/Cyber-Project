@@ -47,7 +47,7 @@ SPAWN_Y = 128
 LB_PORT = 8080
 
 MY_IP = gs_and_lb_helper_functions.get_local_ip()
-MY_PORT = 4434
+MY_PORT = 4435
 
 
 def load_map():
