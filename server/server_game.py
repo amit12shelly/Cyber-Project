@@ -120,6 +120,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
         client_id = self.player_id
         # CONNECTED
         if data_str.startswith("Connected|"):
+
             try:
                 parts = data_str.split("|")
             except:
@@ -167,6 +168,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
                 # 2. שלב האבטחה (Validation) מול הנתונים מה-LB
                 # 2. שלב האבטחה (Validation) מול הנתונים מה-LB
+                # 2. שלב האבטחה (Validation) מול הנתונים מה-LB
                 if sent_id in state.expected_players:
                     expected_data = state.expected_players[sent_id]
 
@@ -185,7 +187,8 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                     if not is_transfer:
                         # === תרחיש 1: התחברות ראשונית מה-Load Balancer ===
                         if abs(c_x - e_x) > 10 or abs(c_y - e_y) > 10:
-                            print(f"[!] DISCONNECT REASON: Position mismatch. Client: {c_x},{c_y} | Expected: {e_x},{e_y}")
+                            print(
+                                f"[!] DISCONNECT REASON: Position mismatch. Client: {c_x},{c_y} | Expected: {e_x},{e_y}")
                             self.disconnect()
                             return
                     else:
@@ -236,6 +239,11 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                         pass
                     del state.expected_players[sent_id]
 
+                elif sent_id in state.players_pos:
+                    # FIX: אם בגלל הפינג/תנודתיות שחקן שלח Connected פעמיים, אנחנו לא דורסים ולא מנתקים אותו!
+                    print(
+                        f"[*] Warning: Player {client_name} already fully connected. Ignoring duplicate request to prevent crash.")
+                    return
                 else:
                     print(f"[!] DISCONNECT REASON: Fake ID '{sent_id}' not found in state.expected_players!")
                     self.disconnect()
@@ -244,11 +252,13 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 # --- אתחול הנתונים ---
                 valid_right = True
                 if state.server_area_right is not None:
-                    valid_right = c_x < (float(state.server_area_right) + float(SCREEN_WIDTH) / 2)
+                    # FIX: הוספנו 300 פיקסלים באפר כדי שההתחברות לא תיכשל כי הגבול בדיוק זז
+                    valid_right = c_x < (float(state.server_area_right) + float(SCREEN_WIDTH) / 2 + 300)
 
                 valid_left = True
                 if state.server_area_left is not None:
-                    valid_left = c_x > (float(state.server_area_left) - float(SCREEN_WIDTH) / 2)
+                    # FIX: הוספנו 300 פיקסלים באפר כדי שההתחברות לא תיכשל כי הגבול בדיוק זז
+                    valid_left = c_x > (float(state.server_area_left) - float(SCREEN_WIDTH) / 2 - 300)
 
                 if valid_right and valid_left:
                     state.players_pos[client_id] = pos_str
@@ -329,12 +339,10 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
                     # ------------------ מעבר שמאלה ------------------
                     if state.server_area_left is not None and new_x < (
-                            float(state.server_area_left) + float(SCREEN_WIDTH / 2)) and state.neighbor.get(
-                            'left') is not None:
+                            float(state.server_area_left) - 50) and state.neighbor.get('left') is not None:
                         nei_ip = state.neighbor['left'].split(':')[0]
                         nei_port = state.neighbor['left'].split(':')[1]
 
-                        # אנחנו רק בודקים אם הוא נכנס לאזור המשותף (או מעבר אליו)
                         if client_id not in state.left_common_zone:
                             state.left_common_zone.append(client_id)
 
@@ -357,24 +365,22 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
                             msg = f"TRANSFER_PLAYER|{real_id}|{client_id}|{p_name}|{px}|{py}|{hp}|{inv_str}|{potions}|{skill_str}"
 
-                            async def safe_transfer():
-                                await send_one_off_message(nei_ip, nei_port, msg)
-                                msg_switch = f"SWITCHED|{nei_ip}|{nei_port}|False\n".encode()
-                                if self.stream_id is not None:
-                                    self._quic.send_stream_data(self.stream_id, msg_switch, end_stream=False)
-                                    self.transmit()
-                                print(f"{p_name} has been asked to switch to {nei_ip}:{nei_port}")
+                            async def safe_transfer_left(c=self, nip=nei_ip, nport=nei_port, m=msg, pname=p_name):
+                                await send_one_off_message(nip, nport, m)
+                                msg_switch = f"SWITCHED|{nip}|{nport}|False\n".encode()
+                                if c.stream_id is not None:
+                                    c._quic.send_stream_data(c.stream_id, msg_switch, end_stream=False)
+                                    c.transmit()
+                                print(f"{pname} has been asked to switch to {nip}:{nport}")
 
-                            asyncio.create_task(safe_transfer())
+                            asyncio.create_task(safe_transfer_left())
 
                     # ------------------ מעבר ימינה ------------------
                     elif state.server_area_right is not None and new_x > (
-                            float(state.server_area_right) - float(SCREEN_WIDTH / 2)) and state.neighbor.get(
-                            'right') is not None:
+                            float(state.server_area_right) + 50) and state.neighbor.get('right') is not None:
                         nei_ip = state.neighbor['right'].split(':')[0]
                         nei_port = state.neighbor['right'].split(':')[1]
 
-                        # אנחנו רק בודקים אם הוא נכנס לאזור המשותף (או מעבר אליו)
                         if client_id not in state.right_common_zone:
                             state.right_common_zone.append(client_id)
 
@@ -397,20 +403,23 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
                             msg = f"TRANSFER_PLAYER|{real_id}|{client_id}|{p_name}|{px}|{py}|{hp}|{inv_str}|{potions}|{skill_str}"
 
-                            async def safe_transfer():
-                                await send_one_off_message(nei_ip, nei_port, msg)
-                                msg_switch = f"SWITCHED|{nei_ip}|{nei_port}|False\n".encode()
-                                if self.stream_id is not None:
-                                    self._quic.send_stream_data(self.stream_id, msg_switch, end_stream=False)
-                                    self.transmit()
-                                print(f"{p_name} has been asked to switch to {nei_ip}:{nei_port}")
+                            async def safe_transfer_right(c=self, nip=nei_ip, nport=nei_port, m=msg, pname=p_name):
+                                await send_one_off_message(nip, nport, m)
+                                msg_switch = f"SWITCHED|{nip}|{nport}|False\n".encode()
+                                if c.stream_id is not None:
+                                    c._quic.send_stream_data(c.stream_id, msg_switch, end_stream=False)
+                                    c.transmit()
+                                print(f"{pname} has been asked to switch to {nip}:{nport}")
 
-                            asyncio.create_task(safe_transfer())
-                    else:
-                        if client_id in state.left_common_zone:
-                            state.left_common_zone.remove(client_id)
-                        elif client_id in state.right_common_zone:
-                            state.right_common_zone.remove(client_id)
+                            asyncio.create_task(safe_transfer_right())
+                        else:
+                            # מחיקה הדרגתית של שחקנים מהרשימה כדי למנוע חסימות
+                            if client_id in state.left_common_zone and state.server_area_left is not None:
+                                if float(new_x) > (float(state.server_area_left) + 200):
+                                    state.left_common_zone.remove(client_id)
+                            elif client_id in state.right_common_zone and state.server_area_right is not None:
+                                if float(new_x) < (float(state.server_area_right) - 200):
+                                    state.right_common_zone.remove(client_id)
 
                     self.broadcast_player(client_id, new_pos, state.players_hp[client_id], False)
 
@@ -934,6 +943,11 @@ class EchoQuicProtocol(QuicConnectionProtocol):
     # ---------- Game logic ---------- #
 
     def disconnect(self):
+        # --- מנגנון הגנה נגד חיבורי רפאים (Ghost Connections) ---
+        if getattr(self, "is_handed_off", False) or self not in state.active_clients:
+            return
+        # -----------------------------------------------------
+
         client_id = self.player_id
         self.broadcast_remove(client_id)
         real_id = state.player_real_id.get(client_id)
@@ -973,7 +987,15 @@ class EchoQuicProtocol(QuicConnectionProtocol):
         # מחיקת השחקן (השאר כמו שהיה)
         state.players_pos.pop(client_id, None)
         state.players_hp.pop(client_id, None)
-        # ... המשך המחיקות של ה-disconnect ...
+        state.players_inventory.pop(client_id, None)
+        state.players_potions.pop(client_id, None)
+        state.players_skills.pop(client_id, None)
+        state.player_name.pop(client_id, None)
+        state.players_control.pop(client_id, None)
+        state.player_real_id.pop(client_id, None)
+
+        if self in state.active_clients:
+            state.active_clients.remove(self)
 
     async def gun_tracking(self, bullet_id: int, gun_type):
         if bullet_id not in state.active_bullets:
@@ -1073,7 +1095,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             # Send DEAD only to the dying player (keeps connection open for respawn)
             dead_client = None
             for client in state.active_clients:
-                if client._quic.host_cid.hex() == client_id:
+                if client.player_id == client_id:  # FIX: Root bug fixed here
                     dead_client = client
                     break
             if dead_client and dead_client.stream_id is not None:
@@ -1098,7 +1120,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
             client_to_remove = None
             for client in state.active_clients:
-                if client._quic.host_cid.hex() == client_id:
+                if client.player_id == client_id:  # FIX: Root bug fixed here
                     client_to_remove = client
                     break
             if client_to_remove:
@@ -1242,7 +1264,7 @@ async def monster_gun_tracking(bullet_id: int, gun_type: str, start_x: float, st
             if abs(px - x) <= TOLERANCE and abs(py - y) <= TOLERANCE:
                 hit_player = True
                 for client in list(state.active_clients):
-                    if client._quic.host_cid.hex() == player_id:
+                    if client.player_id == player_id:  # FIX: Root bug fixed here
                         client.damage(player_id, gun_damage)
                         break
                 break
@@ -1260,7 +1282,6 @@ async def monster_gun_tracking(bullet_id: int, gun_type: str, start_x: float, st
         if client.stream_id is not None:
             client._quic.send_stream_data(client.stream_id, msg_del, end_stream=False)
             client.transmit()
-
 
 def pitagoras(x, y):
     return math.sqrt((x * x) + (y * y))
@@ -1434,8 +1455,8 @@ def broadcast_visible_monsters():
     for client in list(state.active_clients):
         if client.stream_id is None:
             continue
-        client_id = client._quic.host_cid.hex()
-        if client_id not in state.players_pos:
+        client_id = client.player_id  # FIX: Using the correct Application ID
+        if not client_id or client_id not in state.players_pos:
             continue
         try:
             px, py = map(float, state.players_pos[client_id].split(","))
@@ -1615,18 +1636,15 @@ async def update_game_potions_from_lb(potions_string):
 def update_server_area_from_lb():
     for client in list(state.active_clients):
         client_id = client.player_id
-
-        # מוודאים שהשחקן קיים כדי למנוע שגיאות
         if client_id not in state.players_pos:
             continue
 
         new_x = float(state.players_pos[client_id].split(",")[0])
 
         if state.players_control.get(client_id, False):
-
             # ------------------ מעבר שמאלה ------------------
             if state.server_area_left is not None and new_x < (
-                    float(state.server_area_left) + float(SCREEN_WIDTH / 2)) and state.neighbor.get('left') is not None:
+                    float(state.server_area_left) - 50) and state.neighbor.get('left') is not None:
                 nei_ip = state.neighbor['left'].split(':')[0]
                 nei_port = state.neighbor['left'].split(':')[1]
 
@@ -1648,7 +1666,6 @@ def update_server_area_from_lb():
 
                 msg = f"TRANSFER_PLAYER|{real_id}|{client_id}|{p_name}|{px}|{py}|{hp}|{inv_str}|{potions}|{skill_str}"
 
-                # קיבוע משתנים כדי למנוע את באג הלולאות של פייתון
                 async def safe_transfer_left(c=client, nip=nei_ip, nport=nei_port, m=msg, pname=p_name):
                     await send_one_off_message(nip, nport, m)
                     msg_switch = f"SWITCHED|{nip}|{nport}|False\n".encode()
@@ -1660,15 +1677,13 @@ def update_server_area_from_lb():
                 if client_id not in state.left_common_zone:
                     state.left_common_zone.append(client_id)
                     asyncio.create_task(safe_transfer_left())
-                    if new_x <= (float(state.server_area_left) - float(SCREEN_WIDTH) / 2):
+                    if new_x <= (float(state.server_area_left) - 50):
                         print(f"Sudden boundary shift (Left)! Initiating Handshake Transfer for {client_id}")
                 continue
 
-
             # ------------------ מעבר ימינה ------------------
             elif state.server_area_right is not None and new_x > (
-                    float(state.server_area_right) - float(SCREEN_WIDTH / 2)) and state.neighbor.get(
-                'right') is not None:
+                    float(state.server_area_right) + 50) and state.neighbor.get('right') is not None:
                 nei_ip = state.neighbor['right'].split(':')[0]
                 nei_port = state.neighbor['right'].split(':')[1]
 
@@ -1690,7 +1705,6 @@ def update_server_area_from_lb():
 
                 msg = f"TRANSFER_PLAYER|{real_id}|{client_id}|{p_name}|{px}|{py}|{hp}|{inv_str}|{potions}|{skill_str}"
 
-                # קיבוע משתנים כדי למנוע את באג הלולאות של פייתון
                 async def safe_transfer_right(c=client, nip=nei_ip, nport=nei_port, m=msg, pname=p_name):
                     await send_one_off_message(nip, nport, m)
                     msg_switch = f"SWITCHED|{nip}|{nport}|False\n".encode()
@@ -1702,26 +1716,18 @@ def update_server_area_from_lb():
                 if client_id not in state.right_common_zone:
                     state.right_common_zone.append(client_id)
                     asyncio.create_task(safe_transfer_right())
-                    if new_x >= (float(state.server_area_right) + float(SCREEN_WIDTH) / 2):
+                    if new_x >= (float(state.server_area_right) + 50):
                         print(f"Sudden boundary shift (Right)! Initiating Handshake Transfer for {client_id}")
                 continue
             else:
-                if client_id in state.left_common_zone:
-                    state.left_common_zone.remove(client_id)
-                elif client_id in state.right_common_zone:
-                    state.right_common_zone.remove(client_id)
-
-            # שורת ה-broadcast_player הוסרה מכאן. אין צורך לשדר מיקום של כולם בכל עדכון LB.
+                if client_id in state.left_common_zone and state.server_area_left is not None:
+                    if float(new_x) > (float(state.server_area_left) + 200):
+                        state.left_common_zone.remove(client_id)
+                elif client_id in state.right_common_zone and state.server_area_right is not None:
+                    if float(new_x) < (float(state.server_area_right) - 200):
+                        state.right_common_zone.remove(client_id)
         else:
-            left_bound = float('-inf') if state.server_area_left is None else float(state.server_area_left) - float(
-                SCREEN_WIDTH) / 2
-            right_bound = float('inf') if state.server_area_right is None else float(state.server_area_right) + float(
-                SCREEN_WIDTH) / 2
-
-            if left_bound < float(new_x) < right_bound:
-                continue
-            else:
-                continue
+            continue
 
 async def connect_to_lb():
     while True:
@@ -1802,8 +1808,8 @@ async def connect_to_lb():
                                 state.left_common_zone.remove(client_id)
                                 continue
                             x = float(state.players_pos[client_id].split(",")[0])
-                            # אנו נסיר מהרשימה רק אם השחקן חזר בצורה מלאה ובטוחה למפה שלנו
-                            if x > (float(state.server_area_left) + float(SCREEN_WIDTH / 2)):
+                            # הוסר ה-SCREEN_WIDTH/2 מהחישוב
+                            if x > (float(state.server_area_left) + 200):
                                 state.left_common_zone.remove(client_id)
 
                         players_list = list(state.right_common_zone)
@@ -1815,8 +1821,8 @@ async def connect_to_lb():
                                 state.right_common_zone.remove(client_id)
                                 continue
                             x = float(state.players_pos[client_id].split(",")[0])
-                            # אנו נסיר מהרשימה רק אם השחקן חזר בצורה מלאה ובטוחה למפה שלנו
-                            if x < (float(state.server_area_right) - float(SCREEN_WIDTH / 2)):
+                            # הוסר ה-SCREEN_WIDTH/2 מהחישוב
+                            if x < (float(state.server_area_right) - 200):
                                 state.right_common_zone.remove(client_id)
 
 
@@ -1944,15 +1950,21 @@ async def connect_to_lb():
 
 
 
+
                 elif msg.startswith("TransferClient|"):
+
                     _, c_id, n_ip, n_port = msg.split("|")
 
                     for client in list(state.active_clients):
-                        if client._quic.host_cid.hex() == c_id:
+
+                        if client.player_id == c_id:  # FIX: Used player_id instead of host_cid.hex()
+
                             print(f"[LB] Sending SWITCH to client {c_id} -> {n_ip}:{n_port}")
 
                             switch_msg = f"SWITCH|{n_ip}|{n_port}\n".encode()
+
                             client._quic.send_stream_data(client.stream_id, switch_msg)
+
                             client.transmit()
 
         except Exception as e:
@@ -2172,7 +2184,6 @@ async def handle_neighbor_connection(reader, writer):
                     "is_transfer": True  # <--- התוספת: זה שחקן שעובר שרת
                 }
 
-                # ------ המנגנון החדש: Handshake Handoff ------
             elif parts[0] == "CLIENT_CONNECTED":
                 real_id = parts[1]
                 client_id = parts[2]
@@ -2211,91 +2222,78 @@ async def handle_neighbor_connection(reader, writer):
 
                             async def delayed_close(c, cid):
                                 await asyncio.sleep(0.15)
+                                c.is_handed_off = True  # חוסם את חיבור הרפאים מלהריץ disconnect
                                 c._quic.close()
+                                c.transmit()  # קריטי! דוחף את סגירת הרשת מיידית למניעת תקיעות ב-QUIC
                                 c.broadcast_remove(cid)
-                                state.players_pos.pop(cid, None)
-                                state.players_hp.pop(cid, None)
-                                state.players_inventory.pop(cid, None)
-                                state.players_potions.pop(cid, None)
-                                state.players_skills.pop(cid, None)
-                                state.player_name.pop(cid, None)
-                                state.players_control.pop(cid, None)
-                                state.player_real_id.pop(cid, None)
+
                                 if c in state.active_clients:
                                     state.active_clients.remove(c)
+
+                                # מוחקים מהסטייט הגלובלי רק אם השחקן לא חזר בינתיים עם סשן חדש לגמרי
+                                still_active = any(other.player_id == cid for other in state.active_clients)
+                                if not still_active:
+                                    state.players_pos.pop(cid, None)
+                                    state.players_hp.pop(cid, None)
+                                    state.players_inventory.pop(cid, None)
+                                    state.players_potions.pop(cid, None)
+                                    state.players_skills.pop(cid, None)
+                                    state.player_name.pop(cid, None)
+                                    state.players_control.pop(cid, None)
+                                    state.player_real_id.pop(cid, None)
 
                             asyncio.create_task(delayed_close(client, client_id))
                             break
 
-
             elif parts[0] == "AUTHORITY_TRANSFER":
 
                 real_id = parts[1]
-
                 client_id = parts[2]
-
                 px = float(parts[3])
-
                 py = float(parts[4])
-
                 hp = int(parts[5])
-
                 inv_str = parts[6]
-
                 potions_str = parts[7]
-
                 skill_str = parts[8]
 
-                # דריסת המצב הלוקאלי עם המצב המושלם מהשרת הישן
+                # --- התיקונים ---
+                state.player_real_id[client_id] = real_id # שמירת מזהה המשתמש האמיתי לדיווחי LB
+                state.players_control[client_id] = True   # לקיחת סמכות רשמית בשרת החדש
+                # ----------------
 
                 state.players_pos[client_id] = f"{px},{py}"
-
                 state.players_hp[client_id] = hp
 
                 inv_dict = {i: {"type": "none", "ammo": 0} for i in range(INVENTORY_SIZE)}
 
                 if inv_str and inv_str.lower() not in ("none", "empty"):
-
                     for item_str in inv_str.split(";"):
-
                         if item_str:
-
                             try:
-
                                 slot_str, w_type, ammo_str = item_str.split(",")
-
                                 inv_dict[int(slot_str)] = {"type": w_type, "ammo": int(ammo_str)}
-
                             except:
-
                                 pass
 
                 state.players_inventory[client_id] = inv_dict
 
                 expected_potions = [p.strip() for p in potions_str.split(",") if
-
                                     p.strip() and p.strip().lower() not in ("none", "empty", "[]")]
 
                 state.players_potions[client_id] = expected_potions
 
                 try:
-
                     s_name, s_dur, s_last, s_act = skill_str.split(",")
-
                     state.players_skills[client_id] = Skill(s_name, float(s_dur), float(s_last), s_act == "True")
-
                 except Exception as e:
-
                     state.players_skills[client_id] = Skill("Speed Boost", 5, 0, False)
 
-                print(f"[Peer-to-Peer] Authority Transfer Complete for {client_id}. Perfectly synced!")
+                print(f"[Peer-to-Peer] Authority Transfer Complete for {client_id}. Perfectly synced and CONTROL TAKEN!")
     except Exception as e:
         print(f"[Peer-to-Peer] Error handling message: {e}")
     finally:
         writer.close()
         await writer.wait_closed()
-
-
 
 async def main():
     while True:
