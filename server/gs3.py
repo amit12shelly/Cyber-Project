@@ -120,160 +120,8 @@ class EchoQuicProtocol(QuicConnectionProtocol):
         client_id = self.player_id
         # CONNECTED
         if data_str.startswith("Connected|"):
-            try:
-                parts = data_str.split("|")
-            except:
-                print("Error while splitting Connected command!")
-                self.disconnect()
-                return
-            # selected_skill = Skill("Speed Boost", 5, 0, False)
-            # state.players_skills[client_id] = selected_skill
-            # if len(parts) < 3:
-            #
-            #     state.players_pos[client_id] = "0,0"
-            #     state.players_hp[client_id] = "100"
-            # else:
-            #     state.players_pos[client_id] = parts[1]
-            #     state.players_hp[client_id] = parts[2]
-            if len(parts) >= 8:
-                sent_id = parts[1]
-                self.player_id = sent_id
-                client_id = sent_id
-                client_name = parts[2]
-                pos_str = parts[3]
-
-                try:
-                    c_x, c_y = map(float, pos_str.split(","))
-                    c_hp = int(parts[4])
-                except ValueError:
-                    print("Cheat/Error detected: Invalid numbers in Connected!")
-                    self.disconnect()
-                    return
-
-                # 1. בונים את האינוונטרי שהקליינט טוען שיש לו
-                c_inv_dict = {}
-                inv_items = parts[5].split("-")
-                for i in range(INVENTORY_SIZE):
-                    if i < len(inv_items):
-                        w_type, ammo = inv_items[i].split(",")
-                        c_inv_dict[i] = {"type": w_type, "ammo": int(ammo)}
-                    else:
-                        c_inv_dict[i] = {"type": "none", "ammo": 0}
-
-                # 1.5 בונים את רשימת הפושנים שהקליינט טוען שיש לו בצורה מאובטחת
-                c_potions_str = parts[6]
-                c_potions = [p.strip() for p in c_potions_str.split(",") if
-                             p.strip() and p.strip().lower() not in ("none", "empty", "[]")]
-
-                # 2. שלב האבטחה (Validation) מול הנתונים מה-LB
-                if sent_id in state.expected_players:
-                    expected_data = state.expected_players[sent_id]
-
-                    e_x = expected_data["x"]
-                    e_y = expected_data["y"]
-                    e_hp = expected_data["hp"]
-                    e_inv = expected_data["inv"]
-
-                    e_potions = expected_data.get("potions", [])
-                    e_potions = [p.strip() for p in e_potions if
-                                 p.strip() and p.strip().lower() not in ("none", "empty", "[]")]
-
-                    # בדיקות אבטחה - מיקום נשאר קריטי
-                    if abs(c_x - e_x) > 10 or abs(c_y - e_y) > 10:
-                        print(f"[!] DISCONNECT REASON: Position mismatch. Client: {c_x},{c_y} | Expected: {e_x},{e_y}")
-                        self.disconnect()
-                        return
-
-                    # אם יש חוסר התאמה בחיים - השרת קובע
-                    if c_hp != e_hp:
-                        print(f"[-] Warning: HP mismatch. Overriding client ({c_hp}) with server ({e_hp}).")
-                        c_hp = e_hp
-
-                    # אם יש חוסר התאמה באינוונטרי - השרת קובע
-                    for i in range(INVENTORY_SIZE):
-                        if c_inv_dict[i]["type"] != e_inv[i]["type"] or c_inv_dict[i]["ammo"] != e_inv[i]["ammo"]:
-                            print(f"[-] Warning: Inventory mismatch. Overriding with server data.")
-                            c_inv_dict = e_inv
-                            break
-
-                    # אם יש חוסר התאמה בשיקויים - השרת קובע
-                    if sorted(c_potions) != sorted(e_potions):
-                        print(f"[-] Warning: Potions mismatch. Client: {c_potions} | Expected: {e_potions}")
-                        print("    -> Overriding client potions with server data.")
-                        c_potions = e_potions
-
-                    print(f"Player {client_name} passed security validation successfully!")
-
-                    real_id = expected_data["id"]
-                    state.player_real_id[client_id] = real_id
-                    send = True
-                    try:
-                        if not state.expected_players[sent_id]["connectMsg"]:
-                            send = False
-                    except:
-                        pass
-                    del state.expected_players[sent_id]
-
-                else:
-                    print(f"[!] DISCONNECT REASON: Fake ID '{sent_id}' not found in state.expected_players!")
-                    self.disconnect()
-                    return
-
-                # --- אתחול הנתונים ---
-                valid_right = True
-                if state.server_area_right is not None:
-                    valid_right = c_x < (float(state.server_area_right) + float(SCREEN_WIDTH) / 2)
-
-                valid_left = True
-                if state.server_area_left is not None:
-                    valid_left = c_x > (float(state.server_area_left) - float(SCREEN_WIDTH) / 2)
-
-                if valid_right and valid_left:
-                    state.players_pos[client_id] = pos_str
-                    state.players_hp[client_id] = c_hp
-                    state.players_inventory[client_id] = c_inv_dict
-                    state.player_name[client_id] = client_name
-                    state.players_control[client_id] = (parts[7] == "True")
-                    state.players_potions[client_id] = c_potions
-                    state.players_skills[client_id] = Skill("Speed Boost", 5, 0, False)
-                else:
-                    print(f"Player {client_name} is out of server bounds, disconnecting.")
-                    self.disconnect()
-                    return
-
-            else:
-                print("Cheat/Error detected: Missing arguments in Connected command!")
-                self.disconnect()
-                return
-
-            print("player connected!")
-            if send:
-                message = f"CONNECT|{state.player_real_id[client_id]}"
-                asyncio.create_task(send_to_lb(message))
-            # --- המשך ההתחברות והשליחה למשתמשים האחרים ---
-
-            for other_id, pos in state.players_pos.items():
-                if other_id == client_id:
-                    continue
-                hp = state.players_hp.get(other_id, "100")
-                inv = state.players_inventory.get(other_id, {})
-                has_weapon = any(v.get("type", "none") != "none" for v in inv.values())
-                msg = f"UPDATE|{other_id}|{pos}|{hp}|{'1' if has_weapon else '0'}\n".encode()
-                if self.stream_id is not None:
-                    self._quic.send_stream_data(self.stream_id, msg, end_stream=False)
-
-            for weapon_id, w_data in state.map_weapons.items():
-                msg = f"DROPPED|{w_data['x']},{w_data['y']}|{w_data['type']}\n".encode()
-                if self.stream_id is not None:
-                    self._quic.send_stream_data(self.stream_id, msg, end_stream=False)
-
-            for potion_id, p_data in state.map_potion.items():
-                msg = f"POTIONS|{p_data['x']},{p_data['y']}|{p_data['type']}\n".encode()
-                if self.stream_id is not None:
-                    self._quic.send_stream_data(self.stream_id, msg, end_stream=False)
-
-            self.broadcast_player(client_id, state.players_pos[client_id], state.players_hp[client_id], False)
-            self.transmit()
+            asyncio.create_task(self.process_connected(data_str))
+            return
 
         # MOVEMENT
         elif data_str.startswith("UPDATE|"):
@@ -286,7 +134,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 return
             new_pos = parts[1]
 
-            if client_id not in state.players_pos:
+            if client_id not in state.players_pos or client_id not in state.players_skills:
                 return
             for other_id, other_pos in list(state.players_pos.items()):
                 if other_id == client_id:
@@ -306,185 +154,96 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 if state.players_control[client_id]:
 
                     # ------------------ מעבר שמאלה ------------------
-                    if state.server_area_left is not None and new_x < (float(state.server_area_left) + float(SCREEN_WIDTH/2)) and state.neighbor.get('left') is not None:
-                        #-----the player is in the common zone/outside the server responsibility-----
+                    if state.server_area_left is not None and new_x < (
+                            float(state.server_area_left) - 50) and state.neighbor.get('left') is not None:
                         nei_ip = state.neighbor['left'].split(':')[0]
                         nei_port = state.neighbor['left'].split(':')[1]
-                        if new_x  > (float(state.server_area_left) - float(SCREEN_WIDTH)/2):
-                            #-----the player is in the common zone-----
-                            if client_id not in state.left_common_zone:
-                                # -----It's for the firsts time!-----
-                                state.left_common_zone.append(client_id)
 
+                        if client_id not in state.left_common_zone:
+                            state.left_common_zone.append(client_id)
 
-                                # -------create a connection between the client and the other gs-------
-
-                                real_id = state.player_real_id.get(client_id)
-                                p_name = state.player_name.get(client_id)
-                                pos = state.players_pos[client_id]
-                                px, py = pos.split(",")
-                                inv = state.players_inventory[client_id]
-                                inv_str = ";".join([f"{i},{inv[i]['type']},{inv[i]['ammo']}" for i in range(INVENTORY_SIZE)])
-                                hp = state.players_hp[client_id]
-                                potions_list = state.players_potions[client_id]
-                                potions = ",".join(potions_list) if potions_list else "None"
+                            # -------create a connection between the client and the other gs-------
+                            real_id = state.player_real_id.get(client_id)
+                            p_name = state.player_name.get(client_id)
+                            pos = state.players_pos[client_id]
+                            px, py = pos.split(",")
+                            inv = state.players_inventory[client_id]
+                            inv_str = ";".join(
+                                [f"{i},{inv[i]['type']},{inv[i]['ammo']}" for i in range(INVENTORY_SIZE)])
+                            hp = state.players_hp[client_id]
+                            potions_list = state.players_potions.get(client_id, [])
+                            potions = ",".join(potions_list) if potions_list else "None"
+                            try:
                                 skill = state.players_skills[client_id]
                                 skill_str = f"{skill.name},{skill.duration_time},{skill.last_action_time},{skill.is_active}"
+                            except:
+                                skill_str = "Speed Boost,5,0,False"
 
+                            msg = f"TRANSFER_PLAYER|{real_id}|{client_id}|{p_name}|{px}|{py}|{hp}|{inv_str}|{potions}|{skill_str}"
 
-                                msg = f"TRANSFER_PLAYER|{real_id}|{client_id}|{p_name}|{px}|{py}|{hp}|{inv_str}|{potions}|{skill_str}"
+                            async def safe_transfer_left(c=self, nip=nei_ip, nport=nei_port, m=msg, pname=p_name):
+                                await send_one_off_message(nip, nport, m)
+                                msg_switch = f"SWITCHED|{nip}|{nport}|False\n".encode()
+                                if c.stream_id is not None:
+                                    c._quic.send_stream_data(c.stream_id, msg_switch, end_stream=False)
+                                    c.transmit()
+                                print(f"{pname} has been asked to switch to {nip}:{nport}")
 
-                                # עוטפים את השליחה כדי לוודא שקודם השרת מתעדכן, ורק אז הקליינט מקבל את הפקודה לעבור!
-                                async def safe_transfer():
-                                    await send_one_off_message(nei_ip, nei_port, msg)
-                                    msg_switch = f"SWITCHED|{nei_ip}|{nei_port}|False\n".encode()
-                                    if self.stream_id is not None:
-                                        self._quic.send_stream_data(self.stream_id, msg_switch, end_stream=False)
-                                        self.transmit()
-                                    print(f"{p_name} has been asked to switch to {nei_ip}:{nei_port}")
-
-                                asyncio.create_task(safe_transfer())
-                        else:
-
-                            #-----outside the server responsibility-----
-                            if client_id in state.left_common_zone:
-                                state.left_common_zone.remove(client_id)
-                            msg_switch = f"CHANGECONTROL|{nei_ip}|{nei_port}|True\n".encode()
-                            self._quic.send_stream_data(self.stream_id, msg_switch, end_stream=False)
-                            self.transmit()
-
-                            #disconnect
-                            if client_id in state.left_common_zone:
-                                state.left_common_zone.remove(client_id)
-                            elif client_id in state.right_common_zone:
-                                state.right_common_zone.remove(client_id)
-                            self._quic.close()
-                            self.broadcast_remove(client_id)
-                            state.players_pos.pop(client_id, None)
-                            state.players_hp.pop(client_id, None)
-                            state.players_inventory.pop(client_id, None)
-                            state.players_potions.pop(client_id, None)
-                            state.players_skills.pop(client_id, None)
-                            state.player_name.pop(client_id, None)
-                            state.players_control.pop(client_id, None)
-                            state.player_real_id.pop(client_id, None)
-
-
-                            if self in state.active_clients:
-                                state.active_clients.remove(self)
-
-                            print("out of border")
-                            return
-
-
-
+                            asyncio.create_task(safe_transfer_left())
 
                     # ------------------ מעבר ימינה ------------------
-                    elif state.server_area_right is not None and new_x > (float(state.server_area_right) - float(SCREEN_WIDTH/2)) and state.neighbor.get('right') is not None:
+                    elif state.server_area_right is not None and new_x > (
+                            float(state.server_area_right) + 50) and state.neighbor.get('right') is not None:
                         nei_ip = state.neighbor['right'].split(':')[0]
                         nei_port = state.neighbor['right'].split(':')[1]
 
-                        if new_x  < (float(state.server_area_right) + float(SCREEN_WIDTH)/2):
-                            if client_id not in state.right_common_zone:
-                                # -----It's for the firsts time!-----
-                                state.right_common_zone.append(client_id)
+                        if client_id not in state.right_common_zone:
+                            state.right_common_zone.append(client_id)
 
-                                # -------create a connection between the client and the other gs-------
-
-                                real_id = state.player_real_id.get(client_id)
-                                p_name = state.player_name.get(client_id)
-                                pos = state.players_pos[client_id]
-                                px, py = pos.split(",")
-                                inv = state.players_inventory[client_id]
-                                inv_str = ";".join([f"{i},{inv[i]['type']},{inv[i]['ammo']}" for i in range(INVENTORY_SIZE)])
-                                hp = state.players_hp[client_id]
-                                potions_list = state.players_potions[client_id]
-                                potions = ",".join(potions_list) if potions_list else "None"
+                            # -------create a connection between the client and the other gs-------
+                            real_id = state.player_real_id.get(client_id)
+                            p_name = state.player_name.get(client_id)
+                            pos = state.players_pos[client_id]
+                            px, py = pos.split(",")
+                            inv = state.players_inventory[client_id]
+                            inv_str = ";".join(
+                                [f"{i},{inv[i]['type']},{inv[i]['ammo']}" for i in range(INVENTORY_SIZE)])
+                            hp = state.players_hp[client_id]
+                            potions_list = state.players_potions.get(client_id, [])
+                            potions = ",".join(potions_list) if potions_list else "None"
+                            try:
                                 skill = state.players_skills[client_id]
                                 skill_str = f"{skill.name},{skill.duration_time},{skill.last_action_time},{skill.is_active}"
+                            except:
+                                skill_str = "Speed Boost,5,0,False"
 
-                                msg = f"TRANSFER_PLAYER|{real_id}|{client_id}|{p_name}|{px}|{py}|{hp}|{inv_str}|{potions}|{skill_str}"
+                            msg = f"TRANSFER_PLAYER|{real_id}|{client_id}|{p_name}|{px}|{py}|{hp}|{inv_str}|{potions}|{skill_str}"
 
-                                # עוטפים את השליחה כדי לוודא שקודם השרת מתעדכן, ורק אז הקליינט מקבל את הפקודה לעבור!
-                                async def safe_transfer():
-                                    await send_one_off_message(nei_ip, nei_port, msg)
-                                    msg_switch = f"SWITCHED|{nei_ip}|{nei_port}|False\n".encode()
-                                    if self.stream_id is not None:
-                                        self._quic.send_stream_data(self.stream_id, msg_switch, end_stream=False)
-                                        self.transmit()
-                                    print(f"{p_name} has been asked to switch to {nei_ip}:{nei_port}")
+                            async def safe_transfer_right(c=self, nip=nei_ip, nport=nei_port, m=msg, pname=p_name):
+                                await send_one_off_message(nip, nport, m)
+                                msg_switch = f"SWITCHED|{nip}|{nport}|False\n".encode()
+                                if c.stream_id is not None:
+                                    c._quic.send_stream_data(c.stream_id, msg_switch, end_stream=False)
+                                    c.transmit()
+                                print(f"{pname} has been asked to switch to {nip}:{nport}")
 
-                                asyncio.create_task(safe_transfer())
-
+                            asyncio.create_task(safe_transfer_right())
                         else:
-                            # חצה לחלוטין.
-                            if client_id in state.right_common_zone:
-                                state.right_common_zone.remove(client_id)
-                            msg_switch = f"CHANGECONTROL|{nei_ip}|{nei_port}|True\n".encode()
-                            self._quic.send_stream_data(self.stream_id, msg_switch, end_stream=False)
-                            self.transmit()
-                            self._quic.close()
-                            self.broadcast_remove(client_id)
-                            if self in state.active_clients:
-                                state.active_clients.remove(self)
-                                # disconnect
-                                if client_id in state.left_common_zone:
+                            # מחיקה הדרגתית של שחקנים מהרשימה כדי למנוע חסימות
+                            if client_id in state.left_common_zone and state.server_area_left is not None:
+                                if float(new_x) > (float(state.server_area_left) + 200):
                                     state.left_common_zone.remove(client_id)
-                                elif client_id in state.right_common_zone:
+                            elif client_id in state.right_common_zone and state.server_area_right is not None:
+                                if float(new_x) < (float(state.server_area_right) - 200):
                                     state.right_common_zone.remove(client_id)
-                                if self in state.active_clients:
-                                    state.active_clients.remove(self)
-                                state.players_pos.pop(client_id, None)
-                                state.players_hp.pop(client_id, None)
-                                state.players_inventory.pop(client_id, None)
-                                state.players_potions.pop(client_id, None)
-                                state.players_skills.pop(client_id, None)
-                                state.player_name.pop(client_id, None)
-                                state.players_control.pop(client_id, None)
-                                state.player_real_id.pop(client_id, None)
-
-                                if self in state.active_clients:
-                                    state.active_clients.remove(self)
-
-
-
-
-                            print("out of border")
-                            return
-                    else:
-                        if client_id in state.left_common_zone:
-                            state.left_common_zone.remove(client_id)
-                        elif client_id in state.right_common_zone:
-                            state.right_common_zone.remove(client_id)
 
                     self.broadcast_player(client_id, new_pos, state.players_hp[client_id], False)
-                else:
-                    if (float(state.server_area_left) - float(SCREEN_WIDTH) / 2) < float(new_x) < (float(state.server_area_right) + float(SCREEN_WIDTH / 2)):
-                        pass #in the server area!
-                    else:
-                        #-----outside the server area-----
-                        self._quic.close()
-                        self.broadcast_remove(client_id)
-                        if self in state.active_clients:
-                            state.active_clients.remove(self)
-                            # disconnect
-                            if client_id in state.left_common_zone:
-                                state.left_common_zone.remove(client_id)
-                            elif client_id in state.right_common_zone:
-                                state.right_common_zone.remove(client_id)
-                            if self in state.active_clients:
-                                state.active_clients.remove(self)
-                            state.players_pos.pop(client_id, None)
-                            state.players_hp.pop(client_id, None)
-                            state.players_inventory.pop(client_id, None)
-                            state.players_potions.pop(client_id, None)
-                            state.players_skills.pop(client_id, None)
-                            state.player_name.pop(client_id, None)
-                            state.players_control.pop(client_id, None)
-                            state.player_real_id.pop(client_id, None)
 
-                            if self in state.active_clients:
-                                state.active_clients.remove(self)
+                else:
+                    # השחקן נמצא אצלנו אך סמכות השליטה עברה לשרת החדש.
+                    # אנחנו רק נותנים לו להמשיך לנוע אצלנו עד שהשרת הישן יסגור אותו באלגנטיות
+                    # בעזרת delayed_close שרץ ב-CLIENT_CONNECTED. לא סוגרים כלום כאן.
+                    pass
             else:
                 self.disconnect()
                 print("player has been kicked! movement problem")
@@ -497,6 +256,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
         # ATTACK
         elif data_str.startswith("ATTACK|"):
+            if not state.players_control.get(client_id, False): return
             try:
                 parts = data_str.split("|")
             except:
@@ -591,6 +351,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
         # PICKUP
         elif data_str.startswith("PICKUP|"):
+            if not state.players_control.get(client_id, False): return
             try:
                 parts = data_str.split("|")
             except:
@@ -639,6 +400,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
         # PPICKUP
         elif data_str.startswith("PPICKUP|"):
+            if not state.players_control.get(client_id, False): return
             try:
                 parts = data_str.split("|")
             except:
@@ -680,6 +442,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
         # USE
         elif data_str.startswith("USE|"):
+            if not state.players_control.get(client_id, False): return
             try:
                 parts = data_str.split("|")
             except:
@@ -729,6 +492,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
         # DROP
         elif data_str.startswith("DROP|"):
+            if not state.players_control.get(client_id, False): return
             try:
                 parts = data_str.split("|")
             except:
@@ -789,6 +553,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             self.broadcast_chat(msg, state.player_name[client_id])
 
         elif data_str.startswith("SKILL|"):
+            if not state.players_control.get(client_id, False): return
             try:
                 parts = data_str.split("|")
             except:
@@ -992,48 +757,217 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             client._quic.send_stream_data(client.stream_id, msg, end_stream=False)
             client.transmit()
     # ---------- Game logic ---------- #
+    async def process_connected(self, data_str: str):
+        try:
+            parts = data_str.split("|")
+        except:
+            print("Error while splitting Connected command!")
+            self.disconnect()
+            return
+
+        if len(parts) >= 8:
+            sent_id = parts[1]
+            self.player_id = sent_id
+            client_id = sent_id
+            client_name = parts[2]
+            pos_str = parts[3]
+
+            try:
+                c_x, c_y = map(float, pos_str.split(","))
+                c_hp = int(parts[4])
+            except ValueError:
+                print("Cheat/Error detected: Invalid numbers in Connected!")
+                self.disconnect()
+                return
+
+            c_inv_dict = {}
+            inv_items = parts[5].split("-")
+            for i in range(INVENTORY_SIZE):
+                if i < len(inv_items):
+                    w_type, ammo = inv_items[i].split(",")
+                    c_inv_dict[i] = {"type": w_type, "ammo": int(ammo)}
+                else:
+                    c_inv_dict[i] = {"type": "none", "ammo": 0}
+
+            c_potions_str = parts[6]
+            c_potions = [p.strip() for p in c_potions_str.split(",") if
+                         p.strip() and p.strip().lower() not in ("none", "empty", "[]")]
+
+            # פתרון השורש ל-Race Condition: לולאת המתנה קצרה למידע מהשרת הישן או מה-LB
+            retries = 0
+            while sent_id not in state.expected_players and sent_id not in state.players_pos and retries < 20:
+                await asyncio.sleep(0.1)
+                retries += 1
+
+            if sent_id in state.expected_players:
+                expected_data = state.expected_players[sent_id]
+
+                e_x = expected_data["x"]
+                e_y = expected_data["y"]
+                e_hp = expected_data["hp"]
+                e_inv = expected_data["inv"]
+
+                e_potions = expected_data.get("potions", [])
+                e_potions = [p.strip() for p in e_potions if
+                             p.strip() and p.strip().lower() not in ("none", "empty", "[]")]
+
+                is_transfer = expected_data.get("is_transfer", False)
+
+                if not is_transfer:
+                    if abs(c_x - e_x) > 10 or abs(c_y - e_y) > 10:
+                        print(f"[!] DISCONNECT REASON: Position mismatch. Client: {c_x},{c_y} | Expected: {e_x},{e_y}")
+                        self.disconnect()
+                        return
+                else:
+                    print(f"Player {client_name} connecting from neighbor. Requesting final sync.")
+                    real_id = expected_data["id"]
+
+                    async def notify_arrival():
+                        msg = f"CLIENT_CONNECTED|{real_id}|{client_id}|{MY_IP}|{MY_PORT}"
+                        if state.neighbor.get('left'):
+                            nip, nport = state.neighbor['left'].split(':')
+                            await send_one_off_message(nip, int(nport), msg)
+                        if state.neighbor.get('right'):
+                            nip, nport = state.neighbor['right'].split(':')
+                            await send_one_off_message(nip, int(nport), msg)
+
+                    asyncio.create_task(notify_arrival())
+
+                if c_hp != e_hp:
+                    print(f"[-] Warning: HP mismatch. Overriding client ({c_hp}) with server ({e_hp}).")
+                    c_hp = e_hp
+
+                for i in range(INVENTORY_SIZE):
+                    if c_inv_dict[i]["type"] != e_inv[i]["type"] or c_inv_dict[i]["ammo"] != e_inv[i]["ammo"]:
+                        print(f"[-] Warning: Inventory mismatch. Overriding with server data.")
+                        c_inv_dict = e_inv
+                        break
+
+                if sorted(c_potions) != sorted(e_potions):
+                    print(f"[-] Warning: Potions mismatch. Client: {c_potions} | Expected: {e_potions}")
+                    print("    -> Overriding client potions with server data.")
+                    c_potions = e_potions
+
+                print(f"Player {client_name} passed security validation successfully!")
+
+                real_id = expected_data["id"]
+                state.player_real_id[client_id] = real_id
+                send = True
+                try:
+                    if not state.expected_players[sent_id]["connectMsg"]:
+                        send = False
+                except:
+                    pass
+                del state.expected_players[sent_id]
+
+            elif sent_id in state.players_pos:
+                print(
+                    f"[*] Warning: Player {client_name} already fully connected. Ignoring duplicate request to prevent crash.")
+                return
+            else:
+                print(f"[!] DISCONNECT REASON: Fake ID '{sent_id}' not found in state.expected_players!")
+                self.disconnect()
+                return
+
+            valid_right = True
+            if state.server_area_right is not None:
+                valid_right = c_x < (float(state.server_area_right) + float(SCREEN_WIDTH) / 2 + 300)
+
+            valid_left = True
+            if state.server_area_left is not None:
+                valid_left = c_x > (float(state.server_area_left) - float(SCREEN_WIDTH) / 2 - 300)
+
+            # FIX 1: We accept the player into the state EVEN IF momentarily out of bounds.
+            # This allows the GS to dynamically pass the new client info to the correct
+            # neighbor using the P2P transfer, preventing permanent kicks during area updates.
+            state.players_pos[client_id] = pos_str
+            state.players_hp[client_id] = c_hp
+            state.players_inventory[client_id] = c_inv_dict
+            state.player_name[client_id] = client_name
+            state.players_control[client_id] = (parts[7] == "True")
+            state.players_potions[client_id] = c_potions
+            state.players_skills[client_id] = Skill("Speed Boost", 5, 0, False)
+
+            if not (valid_right and valid_left):
+                print(
+                    f"Player {client_name} is out of bounds upon connection. Accepted momentarily for seamless neighbor sync/transfer.")
+
+        else:
+            print("Cheat/Error detected: Missing arguments in Connected command!")
+            self.disconnect()
+            return
+
+        print("player connected!")
+        if send:
+            message = f"CONNECT|{state.player_real_id[client_id]}"
+            asyncio.create_task(send_to_lb(message))
+
+        for other_id, pos in state.players_pos.items():
+            if other_id == client_id:
+                continue
+            hp = state.players_hp.get(other_id, "100")
+            inv = state.players_inventory.get(other_id, {})
+            has_weapon = any(v.get("type", "none") != "none" for v in inv.values())
+            msg = f"UPDATE|{other_id}|{pos}|{hp}|{'1' if has_weapon else '0'}\n".encode()
+            if self.stream_id is not None:
+                self._quic.send_stream_data(self.stream_id, msg, end_stream=False)
+
+        for weapon_id, w_data in state.map_weapons.items():
+            msg = f"DROPPED|{w_data['x']},{w_data['y']}|{w_data['type']}\n".encode()
+            if self.stream_id is not None:
+                self._quic.send_stream_data(self.stream_id, msg, end_stream=False)
+
+        for potion_id, p_data in state.map_potion.items():
+            msg = f"POTIONS|{p_data['x']},{p_data['y']}|{p_data['type']}\n".encode()
+            if self.stream_id is not None:
+                self._quic.send_stream_data(self.stream_id, msg, end_stream=False)
+
+        self.broadcast_player(client_id, state.players_pos[client_id], state.players_hp[client_id], False)
+        self.transmit()
 
     def disconnect(self):
-        client_id = self.player_id
+        # --- מנגנון הגנה נגד חיבורי רפאים (Ghost Connections) ---
+        if getattr(self, "is_handed_off", False) or self not in state.active_clients:
+            return
+        # -----------------------------------------------------
 
+        client_id = self.player_id
         self.broadcast_remove(client_id)
         real_id = state.player_real_id.get(client_id)
 
-        if real_id and client_id in state.players_pos and client_id in state.players_hp and client_id in state.players_inventory:
-            pos = state.players_pos[client_id]
-            try:
-                x, y = pos.split(",")
-            except:
-                x, y = 0, 0
+        # הוספנו את ה-if הזה כדי לחסום דיווחים כוזבים כששחקן עובר שרת
+        if real_id:
+            if client_id in state.players_pos and client_id in state.players_hp and client_id in state.players_inventory:
+                pos = state.players_pos[client_id]
+                try:
+                    x, y = pos.split(",")
+                except:
+                    x, y = 0, 0
 
-            hp = state.players_hp[client_id]
-            inv = state.players_inventory[client_id]
+                hp = state.players_hp[client_id]
+                inv = state.players_inventory[client_id]
 
-            # --- טיפול בפושנים ---
-            potions_list = state.players_potions.get(client_id, [])
-            # שומרים כרשימה מופרדת בפסיקים, או מחרוזת "None" אם התיק ריק
-            potions_str = ",".join(potions_list) if potions_list else "None"
+                potions_list = state.players_potions.get(client_id, [])
+                potions_str = ",".join(potions_list) if potions_list else "None"
 
-            # הופכים את המילון של התיק למחרוזת בפורמט שביקשת
-            # הופכים את המילון של התיק למחרוזת בפורמט שה-LB מצפה לו: type,ammo (ללא מספר סלוט!)
-            inv_items = []
-            for i in range(INVENTORY_SIZE):
-                if i in inv:
-                    inv_items.append(f"{inv[i]['type']},{inv[i]['ammo']}")
-                else:
-                    inv_items.append("none,0")
-            inv_str = ";".join(inv_items)
+                inv_items = []
+                for i in range(INVENTORY_SIZE):
+                    if i in inv:
+                        inv_items.append(f"{inv[i]['type']},{inv[i]['ammo']}")
+                    else:
+                        inv_items.append("none,0")
+                inv_str = ";".join(inv_items)
 
-            # מוסיפים את הפושנים בסוף הודעת השמירה
-            save_msg = f"SAVE|{real_id}|{x}|{y}|{hp}|{inv_str}|{potions_str}\n"
+                save_msg = f"SAVE|{real_id}|{x}|{y}|{hp}|{inv_str}|{potions_str}\n"
 
-            if hasattr(state, 'lb_writer') and state.lb_writer:
-                state.lb_writer.write(save_msg.encode())
-                print(f"[!] Sent immediate SAVE for player {real_id}")
+                if hasattr(state, 'lb_writer') and state.lb_writer:
+                    state.lb_writer.write(save_msg.encode())
+                    print(f"[!] Sent immediate SAVE for player {real_id}")
 
-        message = f"DISCONNECT|{real_id}"
-        asyncio.create_task(send_to_lb(message))
-        # מחיקת השחקן מכל המילונים הרלוונטיים (בטוח, ללא קריסות KeyError)
+            message = f"DISCONNECT|{real_id}"
+            asyncio.create_task(send_to_lb(message))
+
+        # מחיקת השחקן (השאר כמו שהיה)
         state.players_pos.pop(client_id, None)
         state.players_hp.pop(client_id, None)
         state.players_inventory.pop(client_id, None)
@@ -1045,10 +979,6 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
         if self in state.active_clients:
             state.active_clients.remove(self)
-
-
-
-        print(client_id, "disconnected")
 
     async def gun_tracking(self, bullet_id: int, gun_type):
         if bullet_id not in state.active_bullets:
@@ -1074,6 +1004,24 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             x, y = get_next_bullet_position(x, y, angle)
             state.active_bullets[bullet_id]["x"] = x
             state.active_bullets[bullet_id]["y"] = y
+
+            # FIX 3a: P2P Bullet Crossing Check
+            if state.server_area_left is not None and x < float(state.server_area_left) and state.neighbor.get('left'):
+                nei_ip, nei_port = state.neighbor['left'].split(':')
+                msg = f"TRANSFER_BULLET|{bullet_id}|{gun_type}|{x}|{y}|{angle}"
+                asyncio.create_task(send_one_off_message(nei_ip, int(nei_port), msg))
+                del state.active_bullets[bullet_id]
+                self.broadcast_del_bullet(str(bullet_id))
+                return
+
+            if state.server_area_right is not None and x > float(state.server_area_right) and state.neighbor.get(
+                    'right'):
+                nei_ip, nei_port = state.neighbor['right'].split(':')
+                msg = f"TRANSFER_BULLET|{bullet_id}|{gun_type}|{x}|{y}|{angle}"
+                asyncio.create_task(send_one_off_message(nei_ip, int(nei_port), msg))
+                del state.active_bullets[bullet_id]
+                self.broadcast_del_bullet(str(bullet_id))
+                return
 
             if not check_if_in_map(x, y):
                 del state.active_bullets[bullet_id]
@@ -1148,7 +1096,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             # Send DEAD only to the dying player (keeps connection open for respawn)
             dead_client = None
             for client in state.active_clients:
-                if client._quic.host_cid.hex() == client_id:
+                if client.player_id == client_id:  # FIX: Root bug fixed here
                     dead_client = client
                     break
             if dead_client and dead_client.stream_id is not None:
@@ -1173,7 +1121,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
             client_to_remove = None
             for client in state.active_clients:
-                if client._quic.host_cid.hex() == client_id:
+                if client.player_id == client_id:  # FIX: Root bug fixed here
                     client_to_remove = client
                     break
             if client_to_remove:
@@ -1303,9 +1251,20 @@ async def monster_gun_tracking(bullet_id: int, gun_type: str, start_x: float, st
             state.active_bullets[bullet_id]["x"] = x
             state.active_bullets[bullet_id]["y"] = y
 
-        if not check_if_in_map(x, y):
+        # FIX 3b: Monster/Transferred bullets crossing boundary
+        if state.server_area_left is not None and x < float(state.server_area_left) and state.neighbor.get('left'):
+            nei_ip, nei_port = state.neighbor['left'].split(':')
+            msg = f"TRANSFER_BULLET|{bullet_id}|{gun_type}|{x}|{y}|{angle}"
+            asyncio.create_task(send_one_off_message(nei_ip, int(nei_port), msg))
             break
-        if state.game_map[int(y / TILE_SIZE)][int(x / TILE_SIZE)] == "#":
+
+        if state.server_area_right is not None and x > float(state.server_area_right) and state.neighbor.get('right'):
+            nei_ip, nei_port = state.neighbor['right'].split(':')
+            msg = f"TRANSFER_BULLET|{bullet_id}|{gun_type}|{x}|{y}|{angle}"
+            asyncio.create_task(send_one_off_message(nei_ip, int(nei_port), msg))
+            break
+
+        if not check_if_in_map(x, y):
             break
 
         hit_player = False
@@ -1317,7 +1276,7 @@ async def monster_gun_tracking(bullet_id: int, gun_type: str, start_x: float, st
             if abs(px - x) <= TOLERANCE and abs(py - y) <= TOLERANCE:
                 hit_player = True
                 for client in list(state.active_clients):
-                    if client._quic.host_cid.hex() == player_id:
+                    if client.player_id == player_id:  # FIX: Root bug fixed here
                         client.damage(player_id, gun_damage)
                         break
                 break
@@ -1335,7 +1294,6 @@ async def monster_gun_tracking(bullet_id: int, gun_type: str, start_x: float, st
         if client.stream_id is not None:
             client._quic.send_stream_data(client.stream_id, msg_del, end_stream=False)
             client.transmit()
-
 
 def pitagoras(x, y):
     return math.sqrt((x * x) + (y * y))
@@ -1360,9 +1318,9 @@ def check_if_in_map(x, y):
     return True
 
 def check_if_position_in_gs_responsibility(x):
-    if float(x) < float(state.server_area_left):
+    if state.server_area_left is not None and float(x) < float(state.server_area_left):
         return False
-    elif float(x) > float(state.server_area_right):
+    elif state.server_area_right is not None and float(x) > float(state.server_area_right):
         return False
     return True
 
@@ -1509,8 +1467,8 @@ def broadcast_visible_monsters():
     for client in list(state.active_clients):
         if client.stream_id is None:
             continue
-        client_id = client._quic.host_cid.hex()
-        if client_id not in state.players_pos:
+        client_id = client.player_id  # FIX: Using the correct Application ID
+        if not client_id or client_id not in state.players_pos:
             continue
         try:
             px, py = map(float, state.players_pos[client_id].split(","))
@@ -1686,6 +1644,103 @@ async def update_game_potions_from_lb(potions_string):
                 client._quic.send_stream_data(client.stream_id, clients_msg, end_stream=False)
                 client.transmit()
 
+
+def update_server_area_from_lb():
+    for client in list(state.active_clients):
+        client_id = client.player_id
+        if client_id not in state.players_pos:
+            continue
+
+        new_x = float(state.players_pos[client_id].split(",")[0])
+
+        if state.players_control.get(client_id, False):
+            # ------------------ מעבר שמאלה ------------------
+            if state.server_area_left is not None and new_x < (
+                    float(state.server_area_left) - 50) and state.neighbor.get('left') is not None:
+                nei_ip = state.neighbor['left'].split(':')[0]
+                nei_port = state.neighbor['left'].split(':')[1]
+
+                real_id = state.player_real_id.get(client_id)
+                p_name = state.player_name.get(client_id)
+                pos = state.players_pos[client_id]
+                px, py = pos.split(",")
+                inv = state.players_inventory[client_id]
+                inv_str = ";".join([f"{i},{inv[i]['type']},{inv[i]['ammo']}" for i in range(INVENTORY_SIZE)])
+                hp = state.players_hp[client_id]
+                potions_list = state.players_potions.get(client_id, [])
+                potions = ",".join(potions_list) if potions_list else "None"
+
+                try:
+                    skill = state.players_skills[client_id]
+                    skill_str = f"{skill.name},{skill.duration_time},{skill.last_action_time},{skill.is_active}"
+                except:
+                    skill_str = "Speed Boost,5,0,False"
+
+                msg = f"TRANSFER_PLAYER|{real_id}|{client_id}|{p_name}|{px}|{py}|{hp}|{inv_str}|{potions}|{skill_str}"
+
+                async def safe_transfer_left(c=client, nip=nei_ip, nport=nei_port, m=msg, pname=p_name):
+                    await send_one_off_message(nip, nport, m)
+                    msg_switch = f"SWITCHED|{nip}|{nport}|False\n".encode()
+                    if c.stream_id is not None:
+                        c._quic.send_stream_data(c.stream_id, msg_switch, end_stream=False)
+                        c.transmit()
+                    print(f"{pname} has been asked to switch to {nip}:{nport}")
+
+                if client_id not in state.left_common_zone:
+                    state.left_common_zone.append(client_id)
+                    asyncio.create_task(safe_transfer_left())
+                    if new_x <= (float(state.server_area_left) - 50):
+                        print(f"Sudden boundary shift (Left)! Initiating Handshake Transfer for {client_id}")
+                continue
+
+            # ------------------ מעבר ימינה ------------------
+            elif state.server_area_right is not None and new_x > (
+                    float(state.server_area_right) + 50) and state.neighbor.get('right') is not None:
+                nei_ip = state.neighbor['right'].split(':')[0]
+                nei_port = state.neighbor['right'].split(':')[1]
+
+                real_id = state.player_real_id.get(client_id)
+                p_name = state.player_name.get(client_id)
+                pos = state.players_pos[client_id]
+                px, py = pos.split(",")
+                inv = state.players_inventory[client_id]
+                inv_str = ";".join([f"{i},{inv[i]['type']},{inv[i]['ammo']}" for i in range(INVENTORY_SIZE)])
+                hp = state.players_hp[client_id]
+                potions_list = state.players_potions.get(client_id, [])
+                potions = ",".join(potions_list) if potions_list else "None"
+
+                try:
+                    skill = state.players_skills[client_id]
+                    skill_str = f"{skill.name},{skill.duration_time},{skill.last_action_time},{skill.is_active}"
+                except:
+                    skill_str = "Speed Boost,5,0,False"
+
+                msg = f"TRANSFER_PLAYER|{real_id}|{client_id}|{p_name}|{px}|{py}|{hp}|{inv_str}|{potions}|{skill_str}"
+
+                async def safe_transfer_right(c=client, nip=nei_ip, nport=nei_port, m=msg, pname=p_name):
+                    await send_one_off_message(nip, nport, m)
+                    msg_switch = f"SWITCHED|{nip}|{nport}|False\n".encode()
+                    if c.stream_id is not None:
+                        c._quic.send_stream_data(c.stream_id, msg_switch, end_stream=False)
+                        c.transmit()
+                    print(f"{pname} has been asked to switch to {nip}:{nport}")
+
+                if client_id not in state.right_common_zone:
+                    state.right_common_zone.append(client_id)
+                    asyncio.create_task(safe_transfer_right())
+                    if new_x >= (float(state.server_area_right) + 50):
+                        print(f"Sudden boundary shift (Right)! Initiating Handshake Transfer for {client_id}")
+                continue
+            else:
+                if client_id in state.left_common_zone and state.server_area_left is not None:
+                    if float(new_x) > (float(state.server_area_left) + 200):
+                        state.left_common_zone.remove(client_id)
+                elif client_id in state.right_common_zone and state.server_area_right is not None:
+                    if float(new_x) < (float(state.server_area_right) - 200):
+                        state.right_common_zone.remove(client_id)
+        else:
+            continue
+
 async def connect_to_lb():
     while True:
         try:
@@ -1754,21 +1809,32 @@ async def connect_to_lb():
                         potions = msg.split("|")[6]
                         await update_game_potions_from_lb(potions)
 
+                        update_server_area_from_lb()
+
                         players_list = list(state.left_common_zone)
                         for client_id in players_list:
+                            if client_id not in state.players_pos:
+                                state.left_common_zone.remove(client_id)
+                                continue
+                            if state.server_area_left is None:
+                                state.left_common_zone.remove(client_id)
+                                continue
                             x = float(state.players_pos[client_id].split(",")[0])
-                            if x > (float(state.server_area_left) + float(SCREEN_WIDTH / 2)):
+                            # הוסר ה-SCREEN_WIDTH/2 מהחישוב
+                            if x > (float(state.server_area_left) + 200):
                                 state.left_common_zone.remove(client_id)
-                            if x < (float(state.server_area_left) - float(SCREEN_WIDTH) / 2):
-                                state.left_common_zone.remove(client_id)
-
 
                         players_list = list(state.right_common_zone)
                         for client_id in players_list:
-                            x = float(state.players_pos[client_id].split(",")[0])
-                            if x > (float(state.server_area_right) - float(SCREEN_WIDTH / 2)):
+                            if client_id not in state.players_pos:
                                 state.right_common_zone.remove(client_id)
-                            if x < (float(state.server_area_right) + float(SCREEN_WIDTH) / 2):
+                                continue
+                            if state.server_area_right is None:
+                                state.right_common_zone.remove(client_id)
+                                continue
+                            x = float(state.players_pos[client_id].split(",")[0])
+                            # הוסר ה-SCREEN_WIDTH/2 מהחישוב
+                            if x < (float(state.server_area_right) - 200):
                                 state.right_common_zone.remove(client_id)
 
 
@@ -1853,7 +1919,9 @@ async def connect_to_lb():
 
                                 "inv": inv_dict,
 
-                                "potions": expected_potions
+                                "potions": expected_potions,
+
+                                "is_transfer": False
 
                             }
 
@@ -1894,16 +1962,33 @@ async def connect_to_lb():
 
 
 
+
+
                 elif msg.startswith("TransferClient|"):
-                    _, c_id, n_ip, n_port = msg.split("|")
 
-                    for client in list(state.active_clients):
-                        if client._quic.host_cid.hex() == c_id:
-                            print(f"[LB] Sending SWITCH to client {c_id} -> {n_ip}:{n_port}")
+                    try:
 
-                            switch_msg = f"SWITCH|{n_ip}|{n_port}\n".encode()
-                            client._quic.send_stream_data(client.stream_id, switch_msg)
-                            client.transmit()
+                        _, c_id, n_ip, n_port = msg.split("|")
+
+                        for client in list(state.active_clients):
+
+                            if client.player_id == c_id:
+
+                                print(f"[LB] Sending SWITCHED to client {c_id} -> {n_ip}:{n_port}")
+
+                                # מתקנים מ-SWITCH ל-SWITCHED בדיוק בפורמט שהקליינט מצפה לו (כולל דגל ה-host)
+
+                                switch_msg = f"SWITCHED|{n_ip}|{n_port}|False\n".encode()
+
+                                if client.stream_id is not None:
+
+                                    client._quic.send_stream_data(client.stream_id, switch_msg, end_stream=False)
+
+                                    client.transmit()
+
+                    except Exception as e:
+
+                        print(f"[LB] Error parsing TransferClient: {e}")
 
         except Exception as e:
             print(f"[LB] Connection error: {e}. Retrying in 5 seconds...")
@@ -2092,17 +2177,14 @@ async def handle_neighbor_connection(reader, writer):
                 hp = int(parts[6])
                 inv_str = parts[7]
                 potions_str = parts[8]
-                # skill_str = parts[9] # אנחנו מקבלים את זה מהשרת הקודם, אבל נתעלם כדי לשמור על תאימות ל-LB
 
                 print(f"[Peer-to-Peer] Receiving player {p_name} ({old_client_id}) from neighbor")
 
-                # שחזור האינוונטרי באותו פורמט בדיוק כמו שה-LB עושה
                 inv_dict = {i: {"type": "none", "ammo": 0} for i in range(INVENTORY_SIZE)}
                 if inv_str and inv_str.lower() not in ("none", "empty"):
                     items_list = inv_str.split(";")
                     for item_str in items_list:
-                        if not item_str:
-                            continue
+                        if not item_str: continue
                         try:
                             slot_str, w_type, ammo_str = item_str.split(",")
                             slot = int(slot_str)
@@ -2111,11 +2193,9 @@ async def handle_neighbor_connection(reader, writer):
                         except ValueError:
                             pass
 
-                # שחזור פושנים בצורה בטוחה
                 expected_potions = [p.strip() for p in potions_str.split(",") if
                                     p.strip() and p.strip().lower() not in ("none", "empty", "[]")]
 
-                # דוחפים את השחקן לרשימת ההמתנה *בדיוק* בפורמט שה-LB משתמש בו!
                 state.expected_players[old_client_id] = {
                     "id": real_id,
                     "x": px,
@@ -2123,15 +2203,149 @@ async def handle_neighbor_connection(reader, writer):
                     "hp": hp,
                     "inv": inv_dict,
                     "potions": expected_potions,
-                    "connectMsg": False
+                    "connectMsg": False,
+                    "is_transfer": True  # <--- התוספת: זה שחקן שעובר שרת
                 }
+
+            elif parts[0] == "CLIENT_CONNECTED":
+                real_id = parts[1]
+                client_id = parts[2]
+                nei_ip = parts[3]
+                nei_port = int(parts[4])
+
+                if client_id in state.players_pos:
+                    state.players_control[client_id] = False  # נעילת סמכות
+
+                    px, py = state.players_pos[client_id].split(",")
+                    inv = state.players_inventory.get(client_id,
+                                                      {i: {"type": "none", "ammo": 0} for i in range(INVENTORY_SIZE)})
+                    inv_str = ";".join([f"{i},{inv[i]['type']},{inv[i]['ammo']}" for i in range(INVENTORY_SIZE)])
+                    hp = state.players_hp.get(client_id, 100)
+                    potions_list = state.players_potions.get(client_id, [])
+                    potions = ",".join(potions_list) if potions_list else "None"
+
+                    # במקרה שאין לסקיל פונקציית ברירת מחדל, נגן על זה
+                    try:
+                        skill = state.players_skills[client_id]
+                        skill_str = f"{skill.name},{skill.duration_time},{skill.last_action_time},{skill.is_active}"
+                    except:
+                        skill_str = "Speed Boost,5,0,False"
+
+                    # הרכבת תמונת המצב הסופית בהחלט!
+                    msg = f"AUTHORITY_TRANSFER|{real_id}|{client_id}|{px}|{py}|{hp}|{inv_str}|{potions}|{skill_str}"
+
+                    asyncio.create_task(send_one_off_message(nei_ip, nei_port, msg))
+
+                    for client in list(state.active_clients):
+                        if client.player_id == client_id:
+                            # הדלקת חסימת הניתוק באופן מיידי! לפני שהקליינט מספיק להגיב
+                            client.is_handed_off = True
+
+                            msg_switch = f"CHANGECONTROL|{nei_ip}|{nei_port}|True\n".encode()
+                            if client.stream_id is not None:
+                                client._quic.send_stream_data(client.stream_id, msg_switch, end_stream=False)
+                                client.transmit()
+
+                            async def delayed_close(c, cid):
+                                # FIX 2: Increased delay to 2.5 seconds.
+                                # This ensures the client fully connects and stabilizes on the new server
+                                # before the old server closes the QUIC connection, preventing the fatal race condition.
+                                await asyncio.sleep(2.5)
+                                c._quic.close()
+                                c.transmit()  # קריטי! דוחף את סגירת הרשת מיידית למניעת תקיעות ב-QUIC
+                                c.broadcast_remove(cid)
+
+                                if c in state.active_clients:
+                                    state.active_clients.remove(c)
+
+                                # מוחקים מהסטייט הגלובלי רק אם השחקן לא חזר בינתיים עם סשן חדש לגמרי
+                                still_active = any(other.player_id == cid for other in state.active_clients)
+                                if not still_active:
+                                    state.players_pos.pop(cid, None)
+                                    state.players_hp.pop(cid, None)
+                                    state.players_inventory.pop(cid, None)
+                                    state.players_potions.pop(cid, None)
+                                    state.players_skills.pop(cid, None)
+                                    state.player_name.pop(cid, None)
+                                    state.players_control.pop(cid, None)
+                                    state.player_real_id.pop(cid, None)
+
+                            asyncio.create_task(delayed_close(client, client_id))
+                            break
+
+            elif parts[0] == "AUTHORITY_TRANSFER":
+
+                real_id = parts[1]
+                client_id = parts[2]
+                px = float(parts[3])
+                py = float(parts[4])
+                hp = int(parts[5])
+                inv_str = parts[6]
+                potions_str = parts[7]
+                skill_str = parts[8]
+
+                # --- התיקונים ---
+                state.player_real_id[client_id] = real_id  # שמירת מזהה המשתמש האמיתי לדיווחי LB
+                state.players_control[client_id] = True  # לקיחת סמכות רשמית בשרת החדש
+                # ----------------
+
+                # אנחנו מסירים את דריסת ה- players_pos כאן!
+                # השרת החדש כבר עוקב אחרי המיקום האמיתי של השחקן ב-Live דרך ה-UDP.
+                # החזרה למיקום של השרת הישן תגרום לכישלון ב-check_movement ולניתוק השחקן.
+                state.players_hp[client_id] = hp
+
+                inv_dict = {i: {"type": "none", "ammo": 0} for i in range(INVENTORY_SIZE)}
+
+                if inv_str and inv_str.lower() not in ("none", "empty"):
+                    for item_str in inv_str.split(";"):
+                        if item_str:
+                            try:
+                                slot_str, w_type, ammo_str = item_str.split(",")
+                                inv_dict[int(slot_str)] = {"type": w_type, "ammo": int(ammo_str)}
+                            except:
+                                pass
+
+                state.players_inventory[client_id] = inv_dict
+
+                expected_potions = [p.strip() for p in potions_str.split(",") if
+                                    p.strip() and p.strip().lower() not in ("none", "empty", "[]")]
+
+                state.players_potions[client_id] = expected_potions
+
+                try:
+                    s_name, s_dur, s_last, s_act = skill_str.split(",")
+                    state.players_skills[client_id] = Skill(s_name, float(s_dur), float(s_last), s_act == "True")
+                except Exception as e:
+                    state.players_skills[client_id] = Skill("Speed Boost", 5, 0, False)
+
+                print(
+                    f"[Peer-to-Peer] Authority Transfer Complete for {client_id}. Perfectly synced and CONTROL TAKEN!")
+
+            elif parts[0] == "TRANSFER_BULLET":
+                # FIX 3c: Receive and track crossing bullets from neighbor servers
+                bullet_id = int(parts[1])
+                gun_type = parts[2]
+                x = float(parts[3])
+                y = float(parts[4])
+                angle = float(parts[5])
+
+                while bullet_id in state.active_bullets:
+                    bullet_id = random.randint(1, MAX_BULLETS)
+
+                state.active_bullets[bullet_id] = {
+                    "x": x,
+                    "y": y,
+                    "angle": angle,
+                }
+                print(f"[Peer-to-Peer] Received crossing bullet {bullet_id} from neighbor")
+                # Track it locally using monster_gun_tracking (works globally for any bullet)
+                asyncio.create_task(monster_gun_tracking(bullet_id, gun_type, x, y, angle))
+
     except Exception as e:
         print(f"[Peer-to-Peer] Error handling message: {e}")
     finally:
         writer.close()
         await writer.wait_closed()
-
-
 
 async def main():
     while True:

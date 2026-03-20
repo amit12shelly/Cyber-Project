@@ -33,6 +33,8 @@ CHAT_Y_BOTTOM_OFFSET = 120
 servers = []
 
 
+
+
 async def quic_network_loop(ip, port):
     config = QuicConfiguration(
         is_client=True,
@@ -87,6 +89,7 @@ async def quic_network_loop(ip, port):
         print(f"Quic connection error ({ip}:{port}):", e)
     finally:
         outgoing_messages.remove_server(ip, port)
+        incoming_messages.put((ip, port, "INTERNAL_SERVER_DISCONNECT"))
 
 def start_quic_thread(ip, port):
     loop = asyncio.new_event_loop()
@@ -746,6 +749,7 @@ def main():
         shield_icon = pygame.image.load("img/shield_icon.png").convert_alpha()
 
         inventory_open = False
+        is_transferring = False
         ui_font = pygame.font.SysFont("arial", 22)
 
         floor_img = pygame.transform.scale(floor_img, (tile_size, tile_size))
@@ -989,10 +993,24 @@ def main():
 
             while not incoming_messages.empty():
                 sender_ip, sender_port, msg = incoming_messages.get()
+
+                if msg == "INTERNAL_SERVER_DISCONNECT":
+                    print(f"Server {sender_ip}:{sender_port} disconnected. Removing from list.")
+                    for s in servers:
+                        if s.ip == sender_ip and s.port == sender_port:
+                            servers.remove(s)
+                            break
+
+                    if len(servers) == 0:
+                        running = False
+
+                # ------------------------------
+
                 print(f"[{sender_ip}:{sender_port}] {msg}")
                 parts = msg.split("|")
                 if not parts:
                     continue
+
                 if parts[0] == "SWITCHED":
                     if len(parts) < 4:
                         continue
@@ -1001,13 +1019,32 @@ def main():
                     new_port = int(parts[2])
                     is_host_flag = parts[3]
 
-                    servers.append(Server(new_ip, new_port))
+                    already_connected = any(srv.ip == new_ip and srv.port == new_port for srv in servers)
 
-                    outgoing_messages.add_server(new_ip, new_port)
+                    is_transferring = True
 
-                    start_quic_thread(new_ip, new_port)
-                    print("connect to the other server")
-                    outgoing_messages.put_to_specific(new_ip, new_port,f"Connected|{MY_ID}|{player_name}|{player.x},{player.y}|{player.hp}|{final_inv_str}|{potions_str}|{is_host_flag}")
+                    if not already_connected:
+                        servers.append(Server(new_ip, new_port))
+                        outgoing_messages.add_server(new_ip, new_port)
+                        start_quic_thread(new_ip, new_port)
+                        print("connect to the other server")
+                    else:
+                        print(f"Already connected to {new_ip}:{new_port}, forcing handoff sync.")
+
+                    current_inv_parts = []
+                    for i in range(5):
+                        if i < len(player.inventory):
+                            current_inv_parts.append(f"{player.inventory[i].name},{player.inventory[i].ammo}")
+                        else:
+                            current_inv_parts.append("none,0")
+                    current_inv_str = "-".join(current_inv_parts)
+
+                    current_potions_names = [p.name for p in inventory]
+                    current_potions_str = ",".join(current_potions_names) if current_potions_names else "None"
+
+                    outgoing_messages.put_to_specific(new_ip, new_port,f"Connected|{MY_ID}|{player_name}|{player.x},{player.y}|{player.hp}|{current_inv_str}|{current_potions_str}|{is_host_flag}")
+
+                    is_transferring = True
                 elif parts[0] == "CHANGECONTROL":
                     if len(parts) < 4:
                         continue
@@ -1016,11 +1053,13 @@ def main():
                     target_port = int(parts[2])
                     is_host_flag = parts[3]
 
+                    # שולחים את אישור השליטה לשרת החדש
                     outgoing_messages.put_to_specific(target_ip, target_port, f"CHANGECONTROL|{is_host_flag}")
 
                     server_to_remove = None
                     for srv in servers:
-                        if srv.ip == target_ip or srv.port == target_port:
+                        # תיקון קריטי: מוחקים את השרת הישן (השולח) ולא את השרת החדש (המטרה)
+                        if srv.ip == sender_ip and srv.port == sender_port:
                             server_to_remove = srv
                             break
 
@@ -1028,6 +1067,8 @@ def main():
                         servers.remove(server_to_remove)
                         outgoing_messages.remove_server(server_to_remove.ip, server_to_remove.port)
                         print(f"Disconnected from old server {server_to_remove.ip}:{server_to_remove.port}")
+
+                    is_transferring = False
 
 
                 if parts[0] == "UPDATE":
@@ -1047,26 +1088,25 @@ def main():
                             remote_players[player_id].update_from_server(x, y, hp)
 
 
+
                 elif parts[0] == "REMOVE":
+
                     if len(parts) < 2:
                         continue
+
                     player_id = parts[1]
-
                     if player_id == MY_ID:
-                        is_active_server = any(srv.ip == sender_ip and srv.port == sender_port for srv in servers)
+                        if is_transferring:
+                            print(f"Ignored REMOVE from {sender_ip}:{sender_port} because we are transferring to a new server.")
+                            continue
 
+                        is_active_server = any(srv.ip == sender_ip and srv.port == sender_port for srv in servers)
                         if not is_active_server:
                             print(f"Ignored REMOVE for MY_ID from disconnected server {sender_ip}:{sender_port}")
                             continue
                         else:
                             pygame.quit()
                             exit()
-
-
-                    elif player_id in remote_players:
-
-                        del remote_players[player_id]
-
                 elif parts[0] == "SHOW-BULLET":
                     if len(parts) < 5:
                         continue
@@ -1146,8 +1186,6 @@ def main():
                     display_name = "You" if sender_id == MY_ID else short_id
                     chat_messages.append((f"<{display_name}> {parts[2]}", time.time()))
 
-                elif parts[0] == "SETID":
-                    MY_ID = parts[1]
 
                 elif parts[0] == "FPS":
                     server_fps = parts[1]
@@ -1171,15 +1209,19 @@ def main():
                     elif parts[2] == "Poison":
                         hp_items.append(Potion(x_potion, y_potion, poison_img, "Poison"))
 
+
                 elif parts[0] == "SKILL":
                     player_id = parts[1]
                     player_skill = parts[2]
                     is_active = parts[3]
+
                     if is_active == "True":
                         active_skills[player_id] = skills_dict[player_skill]
                     else:
-                        del active_skills[player_id]
-                    print(active_skills)
+                        if player_id in active_skills:
+                            del active_skills[player_id]
+
+
                 elif parts[0] == "POISON":
                     pos = parts[1]
                     x, y = map(float, pos.split(","))
