@@ -1187,39 +1187,15 @@ class Monster:
         self.last_shot_time = time.time() - random.uniform(0, 2)
 
     def take_damage(self, damage):
+        global monsters_list
         self.hp -= damage
         if self.hp <= 0:
+
             death_x = self.x
             death_y = self.y
 
-            tiles_high = len(state.game_map)
-            tiles_wide = len(state.game_map[0])
-            tile_x = random.randint(0, tiles_wide - 1)
-            tile_y = random.randint(0, tiles_high - 1)
-            pixel_x = float(tile_x * TILE_SIZE)
-            pixel_y = float(tile_y * TILE_SIZE)
-            self.x = pixel_x
-            self.y = pixel_y
-
-            while state.game_map[tile_y][tile_x] != ".":
-                tile_x = random.randint(0, tiles_wide - 1)
-                tile_y = random.randint(0, tiles_high - 1)
-                pixel_x = float(tile_x * TILE_SIZE)
-                pixel_y = float(tile_y * TILE_SIZE)
-                self.x = pixel_x
-                self.y = pixel_y
-
-            self.hp = 100
-            self.weapon = random.choice(WEAPON_LIST)
-            self.nearest_player = find_nearest_player(self.x, self.y)
-
-            if self.nearest_player:
-                self.path = A_star_algorythm((self.x, self.y), self.nearest_player, TILE_SIZE)
-            else:
-                self.path = None
-
-            self.last_path_time = time.time()
-            self.last_shot_time = time.time()
+            state.pending_lb_updates.append(f"REMOVE:{death_x},{death_y},MONSTER")
+            monsters_list.remove(self)
 
             for i in range(1):
                 item = random.choice(POTION_LIST)
