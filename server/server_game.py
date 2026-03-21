@@ -2074,7 +2074,7 @@ async def register_with_lb_once(lb_ip: str, timeout: float = 5.0) -> bool:
                 try:
                     print(msg)
                     parts = msg.split("|")
-                    if len(parts) < 7:
+                    if len(parts) < 8:
                         print(f"wrong msg from lb - only {len(parts)} parts")
                     border_l = parts[1]
                     border_r = parts[2]
@@ -2127,6 +2127,10 @@ async def register_with_lb_once(lb_ip: str, timeout: float = 5.0) -> bool:
                             "y": float(y_str),
                             "type": p_type,
                         }
+
+                    monsters = msg.split("|")[7]
+
+                    await update_game_monsters_from_lb(monsters)
 
 
                     writer.close()
