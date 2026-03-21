@@ -1466,18 +1466,21 @@ async def monsters_manager():
                 monster.last_path_time = now
             if monster.path:
                 if float(monster.path.data[0]) > float(state.server_area_right) and state.server_area_right is not None:
-                    nei_ip, nei_port = state.neighbor.get('left').split(':')
-                    msg = f"TRANSFER_MONSTER|{monster.x}|{monster.y}|{monster.weapon[0]}|{monster.hp}"
-                    asyncio.create_task(send_one_off_message(nei_ip, int(nei_port), msg))
-
-                    print(f"[P2P] Sent message to left neighbor: {nei_ip}:{nei_port}")
-
-                elif float(monster.path.data[0]) < float(state.server_area_left) and state.server_area_left is not None:
                     nei_ip, nei_port = state.neighbor.get('right').split(':')
                     msg = f"TRANSFER_MONSTER|{monster.x}|{monster.y}|{monster.weapon[0]}|{monster.hp}"
                     asyncio.create_task(send_one_off_message(nei_ip, int(nei_port), msg))
-
+                    monsters_list.remove(monster)
                     print(f"[P2P] Sent message to right neighbor: {nei_ip}:{nei_port}")
+                    continue
+
+                elif float(monster.path.data[0]) < float(state.server_area_left) and state.server_area_left is not None:
+                    nei_ip, nei_port = state.neighbor.get('left').split(':')
+                    msg = f"TRANSFER_MONSTER|{monster.x}|{monster.y}|{monster.weapon[0]}|{monster.hp}"
+                    asyncio.create_task(send_one_off_message(nei_ip, int(nei_port), msg))
+                    monsters_list.remove(monster)
+                    print(f"[P2P] Sent message to left neighbor: {nei_ip}:{nei_port}")
+                    continue
+
 
                 else:
                     monster.x = monster.path.data[0]
@@ -2370,10 +2373,10 @@ async def handle_neighbor_connection(reader, writer):
                 asyncio.create_task(monster_gun_tracking(bullet_id, gun_type, x, y, angle))
 
             elif parts[0] == "TRANSFER_MONSTER":
-                    x = parts[1]
-                    y = parts[2]
+                    x = float(parts[1])
+                    y = float(parts[2])
                     type_str = parts[3]
-                    hp = parts[4]
+                    hp = int(parts[4])
                     new_monster = Monster(x,y,type_str,hp)
                     monsters_list.append(new_monster)
 
