@@ -27,7 +27,7 @@ SCREEN_HEIGHT = 1080
 MAX_WEAPONS = 9000
 AMOUNT_TO_DROP_IN_DEATH = 2
 ENTITIES_SPEED = 4
-WEAPON_LIST = [["gun", 20, TILE_SIZE * 10],["rifle" ,10 , TILE_SIZE * 20],["rpg",30,TILE_SIZE*25]]
+WEAPON_LIST = [["gun", 30, TILE_SIZE],["rifle" ,10 , TILE_SIZE * 20],["rpg",30,TILE_SIZE*25]]
 WEAPON_NAMES = [w[0] for w in WEAPON_LIST]
 WEAPON_DAMAGE = [w[1] for w in WEAPON_LIST]
 WEAPON_RANGE = [w[2] for w in WEAPON_LIST]
@@ -86,7 +86,6 @@ class GameState:
     #game info
     map_weapons = {}  # weapon_id -> {x, y, type}
     game_map = load_map()
-    monsters = {}
     map_potion = {}
 
 
@@ -116,7 +115,6 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             self.disconnect()
 
     def handle_message(self, data_str: str):
-
         print(data_str)
         client_id = self.player_id
         # CONNECTED
@@ -455,12 +453,11 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 return
 
             item_name = parts[1]
-
-            if client_id not in state.players_hp:
-                return
             if item_name not in state.players_potions[client_id]:
                 return
             state.players_potions[client_id].remove(item_name)
+            if item_name not in state.players_potions[client_id]:
+                return
 
             if item_name == "Potion":
                 state.players_hp[client_id] += UP_HP
@@ -572,7 +569,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 return
             click_time = float(parts[2])
             elapsed_since_last_press = click_time - state.players_skills[client_id].last_action_time
-            required_time = state.players_skills[client_id].duration_time + SKILL_COOL_TIME
+            required_time = (0 if state.players_skills[client_id].last_action_time == 0 else state.players_skills[client_id].duration_time) + SKILL_COOL_TIME
 
             if elapsed_since_last_press >= required_time:
                 state.players_skills[client_id] = sent_skill
@@ -1128,6 +1125,11 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                 del state.players_hp[client_id]
             if client_id in state.players_inventory:
                 del state.players_inventory[client_id]
+            if client_id in state.players_potions:
+                del state.players_potions[client_id]
+            if client_id in state.players_skills:
+                del state.players_skills[client_id]
+            # NOTE: do NOT remove from state.active_clients
 
             client_to_remove = None
             for client in state.active_clients:
@@ -1169,9 +1171,9 @@ class Skill:
 
 
 class Monster:
-    def __init__(self, x, y, hp):
+    def __init__(self, x, y,weapon , hp):
         self.hp = hp
-        self.weapon = random.choice(WEAPON_LIST)
+        self.weapon = weapon
         self.x = x
         self.y = y
         self.nearest_player = find_nearest_player(self.x, self.y)
@@ -1463,9 +1465,30 @@ async def monsters_manager():
                 monster.path = new_path
                 monster.last_path_time = now
             if monster.path:
-                monster.x = monster.path.data[0]
-                monster.y = monster.path.data[1]
-                monster.path = monster.path.next
+                if float(monster.path.data[0]) > float(state.server_area_right) and state.server_area_right is not None:
+                    nei_ip, nei_port = state.neighbor.get('left').split(':')
+                    msg = f"TRANSFER_MONSTER|{monster.x}|{monster.y}|{monster.weapon[0]}|{monster.hp}"
+                    asyncio.create_task(send_one_off_message(nei_ip, int(nei_port), msg))
+
+                    print(f"[P2P] Sent message to left neighbor: {nei_ip}:{nei_port}")
+
+                elif float(monster.path.data[0]) < float(state.server_area_left) and state.server_area_left is not None:
+                    nei_ip, nei_port = state.neighbor.get('right').split(':')
+                    msg = f"TRANSFER_MONSTER|{monster.x}|{monster.y}|{monster.weapon[0]}|{monster.hp}"
+                    asyncio.create_task(send_one_off_message(nei_ip, int(nei_port), msg))
+
+                    print(f"[P2P] Sent message to right neighbor: {nei_ip}:{nei_port}")
+
+                else:
+                    monster.x = monster.path.data[0]
+                    monster.y = monster.path.data[1]
+                    monster.path = monster.path.next
+                    if monster.weapon[0] == "gun":
+                        type_str = "long"
+                    else:
+                        type_str = "short"
+                    state.pending_lb_updates.append(f"MONSTER:{monster.x},{monster.y},{type_str},{monster.hp}")
+
             if i % 50 == 0:
                 await asyncio.sleep(0)
         broadcast_visible_monsters()
@@ -1655,6 +1678,32 @@ async def update_game_potions_from_lb(potions_string):
                 client.transmit()
 
 
+async def update_game_monsters_from_lb(monsters_string):
+    #reset the server monsters list
+    global monsters_list
+    monsters_list = []
+
+    if monsters_string and monsters_string != "None":
+
+        temp_monsters_list = monsters_string.split(";")
+        for monster_str in temp_monsters_list:
+            if not monster_str:
+                continue
+            parts = monster_str.split(",")
+            if len(parts) >= 4:
+                x = float(parts[0])
+                y = float(parts[1])
+                type_str = float(parts[2])
+                hp = int(parts[3])
+                if type_str == "long":
+                    type_str = "gun"
+                else:
+                    type_str = "rifle"
+
+                new_monster = Monster(x,y,type_str, hp)
+                monsters_list.append(new_monster)
+
+
 def update_server_area_from_lb():
     for client in list(state.active_clients):
         client_id = client.player_id
@@ -1822,6 +1871,10 @@ async def connect_to_lb():
                         potions = msg.split("|")[6]
                         await update_game_potions_from_lb(potions)
 
+                        monsters = msg.split("|")[7]
+
+                        await update_game_monsters_from_lb(monsters)
+
                         update_server_area_from_lb()
 
                         players_list = list(state.left_common_zone)
@@ -1870,72 +1923,45 @@ async def connect_to_lb():
                         parts = [p.strip() for p in msg.split("|")]
 
                         if len(parts) >= 8:
-
                             p_id = parts[1]
-
                             fake_id = parts[2]
-
                             p_name = parts[3]
-
                             px = float(parts[4])
-
                             py = float(parts[5])
-
                             php = int(parts[6])
-
                             pinv_str = parts[7]
 
-                            # אם ה-LB שלח פושנים ניקח אותם, אחרת נניח "None"
 
                             potions_str = parts[8] if len(parts) >= 9 else "None"
-
-                            # 1. אינוונטרי
-
                             inv_dict = {int(i): {"type": "none", "ammo": 0} for i in range(INVENTORY_SIZE)}
-
                             if pinv_str and pinv_str.lower() not in ("none", "empty"):
-
                                 items_list = pinv_str.split(";")
-
                                 for item_str in items_list:
-
                                     if not item_str:
                                         continue
 
                                     try:
 
                                         slot_str, w_type, ammo_str = item_str.split(",")
-
                                         slot = int(slot_str)
-
                                         if 0 <= slot < INVENTORY_SIZE:
                                             inv_dict[slot] = {"type": w_type, "ammo": int(ammo_str)}
 
                                     except ValueError:
-
                                         pass
 
                             # 2. חילוץ הפושנים בצורה בטוחה שמתעלמת מרווחים
-
-                            expected_potions = [p.strip() for p in potions_str.split(",") if
-                                                p.strip() and p.strip().lower() not in ("none", "empty", "[]")]
-
+                            expected_potions = [p.strip() for p in potions_str.split(",") if p.strip() and p.strip().lower() not in ("none", "empty", "[]")]
                             # 3. שומרים הכל במילון
 
                             state.expected_players[fake_id] = {
 
                                 "id": p_id,
-
                                 "x": px,
-
                                 "y": py,
-
                                 "hp": php,
-
                                 "inv": inv_dict,
-
                                 "potions": expected_potions,
-
                                 "is_transfer": False
 
                             }
@@ -1960,22 +1986,6 @@ async def connect_to_lb():
                             client.transmit()
                     except:
                         print("Error while getting a chat msg from lb")
-
-
-                elif msg.startswith("GET-MONSTER"):
-                    try:
-                        parts = msg.split("|")[1:]
-                        for monsters in parts:
-                            pixel_x = monsters.split(",")[0]
-                            pixel_y = monsters.split(",")[1]
-                            hp = monsters.split(",")[2]
-                            monster = Monster(pixel_x, pixel_y, hp)
-                            monsters_list.append(monster)
-                    except:
-                        print("Error while getting monsters from lb")
-
-
-
 
 
 
@@ -2175,6 +2185,7 @@ async def send_one_off_message(target_ip, target_port, message):
 
 
 async def handle_neighbor_connection(reader, writer):
+    global  monsters_list
     try:
         line = await reader.readline()
         if line:
@@ -2357,6 +2368,14 @@ async def handle_neighbor_connection(reader, writer):
                 print(f"[Peer-to-Peer] Received crossing bullet {bullet_id} from neighbor")
                 # Track it locally using monster_gun_tracking (works globally for any bullet)
                 asyncio.create_task(monster_gun_tracking(bullet_id, gun_type, x, y, angle))
+
+            elif parts[0] == "TRANSFER_MONSTER":
+                    x = parts[1]
+                    y = parts[2]
+                    type_str = parts[3]
+                    hp = parts[4]
+                    new_monster = Monster(x,y,type_str,hp)
+                    monsters_list.append(new_monster)
 
     except Exception as e:
         print(f"[Peer-to-Peer] Error handling message: {e}")
