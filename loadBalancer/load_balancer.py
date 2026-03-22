@@ -4,6 +4,7 @@ import time
 import server
 import weapons_manager
 import potions_manager
+import monster_manager
 
 WIDTH = 1920 * 64
 LB_IP = "0.0.0.0"
@@ -33,6 +34,11 @@ async def forward_save_to_login(message):
 def serialize_items(items_dict):
     return ";".join([f"{data['x']},{data['y']},{data['type']}"
                      for id, data in items_dict.items()])
+
+
+def serialize_monsters(monsters_dict):
+    return ";".join([f"{m_id},{data['x']},{data['y']},{data['type']},{data['hp']}"
+                     for m_id, data in monsters_dict.items()])
 
 
 async def divide_map():
@@ -84,10 +90,17 @@ async def divide_map():
             if new_min <= data["x"] < new_max
         }
 
+        relevant_monsters = {
+            m_id: data
+            for m_id, data in monster_manager.state.map_monsters.items()
+            if new_min <= data["x"] < new_max
+        }
+
         loot_str = serialize_items(relevant_loot)
         potions_str = serialize_items(relevant_potions)
+        monsters_str = serialize_monsters(relevant_monsters)
 
-        update_msg = f"UpdateStats|{new_min}|{new_max}|{left_neighbor}|{right_neighbor}|{loot_str}|{potions_str}\n"
+        update_msg = f"UpdateStats|{new_min}|{new_max}|{left_neighbor}|{right_neighbor}|{loot_str}|{potions_str}|{monsters_str}\n"
 
         try:
             s.writer.write(update_msg.encode())
@@ -228,20 +241,55 @@ async def handle_gs_lifecycle(reader, writer):
                             else:
                                 weapons_manager.state.map_weapons[new_id] = {"x": x, "y": y, "type": item_kind}
 
-                        elif cmd_type == "remove":
-                            # פורמט: remove:x,y,item_type
-                            x, y, item_kind = data.split(",")
-                            x, y = int(x), int(y)
 
-                            # חיפוש ומחיקה מהמנהל המתאים
-                            if "potion" in item_kind.lower() or "poison" in item_kind.lower():
-                                to_delete = [id for id, d in potions_manager.state.map_potions.items()
-                                             if d["x"] == x and d["y"] == y]
-                                for id_del in to_delete: del potions_manager.state.map_potions[id_del]
-                            else:
-                                to_delete = [id for id, d in weapons_manager.state.map_weapons.items()
-                                             if d["x"] == x and d["y"] == y]
-                                for id_del in to_delete: del weapons_manager.state.map_weapons[id_del]
+                        elif cmd_type == "monster":
+                            try:
+                                m_id, mx, my, mtype, mhp = data.split(",")
+                                m_id, mx, my, mhp = int(m_id), int(mx), int(my), int(mhp)
+
+                                if m_id in monster_manager.state.map_monsters:
+                                    monster_manager.state.map_monsters[m_id]["hp"] = mhp
+                                    monster_manager.state.map_monsters[m_id]["x"] = mx
+                                    monster_manager.state.map_monsters[m_id]["y"] = my
+                                else:
+                                    print(f"[!] Received update for unknown monster ID: {m_id}")
+
+                            except ValueError:
+                                print(f"[!] Malformed monster update data: {data}")
+
+
+                        elif cmd_type == "remove":
+                            try:
+                                parts_remove = data.split(",")
+
+                                if len(parts_remove) == 1:
+                                    m_id = int(parts_remove[0])
+
+                                    if m_id in monster_manager.state.map_monsters:
+                                        m_type = monster_manager.state.map_monsters[m_id].get("type", "Unknown")
+                                        del monster_manager.state.map_monsters[m_id]
+                                        print(f"[*] Monster {m_type} (ID: {m_id}) died. Removed by GS request.")
+
+                                        monster_manager.spawn_single_monster(MAP_NAME)
+                                        print(f"[*] New monster added to global state.")
+                                    else:
+                                        print(f"[!] GS tried to remove unknown monster ID: {m_id}")
+
+                                elif len(parts_remove) == 3:
+                                    x_str, y_str, item_kind = parts_remove
+                                    x, y = int(x_str), int(y_str)
+
+                                    if "potion" in item_kind.lower() or "poison" in item_kind.lower():
+                                        to_delete = [idx for idx, d in potions_manager.state.map_potions.items()
+                                                        if d["x"] == x and d["y"] == y]
+                                        for id_del in to_delete: del potions_manager.state.map_potions[id_del]
+                                    else:
+                                        to_delete = [idx for idx, d in weapons_manager.state.map_weapons.items()
+                                                        if d["x"] == x and d["y"] == y]
+                                        for id_del in to_delete: del weapons_manager.state.map_weapons[id_del]
+
+                            except Exception as e:
+                                print(f"[!] Error processing remove: {e}")
 
 
                         elif cmd_type == "chat":
@@ -259,7 +307,7 @@ async def handle_gs_lifecycle(reader, writer):
                                             print(f"[!] Failed to broadcast chat to GS-{s.id}: {e}")
 
                     # אם ה-CPU השתנה משמעותית -> מחלקים מחדש
-                    if abs(old_cpu - cpu_load) > 100: #or len(parts) > 3 אם יש שינויים בדברים
+                    if abs(old_cpu - cpu_load) > 10: #or len(parts) > 3 אם יש שינויים בדברים
                         await divide_map()
 
             elif parts[0] == "RegisterPlayer":
@@ -342,6 +390,7 @@ async def main():
 
         weapons_manager.spawn_loot_per_camera_zone(game_map, per_zone=2)
         potions_manager.spawn_potions_per_camera_zone(game_map, per_zone=2)
+        monster_manager.spawn_monsters_per_camera_zone(game_map, per_zone=1)
 
         print(f"[*] World populated: {len(weapons_manager.state.map_weapons)} weapons, "
               f"{len(potions_manager.state.map_potions)} potions.")
@@ -355,7 +404,6 @@ async def main():
     async with server:
         await server.serve_forever()
 
-# spawn_random_monsters(MONSTERS_AMOUNT)
 
 if __name__ == "__main__":
     try:
