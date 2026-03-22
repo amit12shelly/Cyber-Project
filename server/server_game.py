@@ -1171,11 +1171,12 @@ class Skill:
 
 
 class Monster:
-    def __init__(self, x, y,weapon , hp):
+    def __init__(self, x, y,weapon , hp, id):
         self.hp = hp
         self.weapon = weapon
         self.x = x
         self.y = y
+        self.id = id
         self.nearest_player = find_nearest_player(self.x, self.y)
 
         if self.nearest_player:
@@ -1194,7 +1195,7 @@ class Monster:
             death_x = self.x
             death_y = self.y
 
-            state.pending_lb_updates.append(f"REMOVE:{death_x},{death_y},MONSTER")
+            state.pending_lb_updates.append(f"remove:{self.id},monster")
             monsters_list.remove(self)
 
             for i in range(1):
@@ -1443,7 +1444,7 @@ async def monsters_manager():
             if monster.path:
                 if float(monster.path.data[0]) > float(state.server_area_right) and state.server_area_right is not None:
                     nei_ip, nei_port = state.neighbor.get('right').split(':')
-                    msg = f"TRANSFER_MONSTER|{monster.x}|{monster.y}|{monster.weapon[0]}|{monster.hp}"
+                    msg = f"TRANSFER_MONSTER|{monster.x}|{monster.y}|{monster.weapon[0]}|{monster.hp}|{monster.id}"
                     asyncio.create_task(send_one_off_message(nei_ip, int(nei_port), msg))
                     monsters_list.remove(monster)
                     print(f"[P2P] Sent message to right neighbor: {nei_ip}:{nei_port}")
@@ -1451,7 +1452,7 @@ async def monsters_manager():
 
                 elif float(monster.path.data[0]) < float(state.server_area_left) and state.server_area_left is not None:
                     nei_ip, nei_port = state.neighbor.get('left').split(':')
-                    msg = f"TRANSFER_MONSTER|{monster.x}|{monster.y}|{monster.weapon[0]}|{monster.hp}"
+                    msg = f"TRANSFER_MONSTER|{monster.x}|{monster.y}|{monster.weapon[0]}|{monster.hp}|{monster.id}"
                     asyncio.create_task(send_one_off_message(nei_ip, int(nei_port), msg))
                     monsters_list.remove(monster)
                     print(f"[P2P] Sent message to left neighbor: {nei_ip}:{nei_port}")
@@ -1466,7 +1467,7 @@ async def monsters_manager():
                         type_str = "long"
                     else:
                         type_str = "short"
-                    state.pending_lb_updates.append(f"MONSTER:{monster.x},{monster.y},{type_str},{monster.hp}")
+                    state.pending_lb_updates.append(f"monster:{monster.id},{monster.x},{monster.y},{type_str},{monster.hp}")
 
             if i % 50 == 0:
                 await asyncio.sleep(0)
@@ -1669,17 +1670,18 @@ async def update_game_monsters_from_lb(monsters_string):
             if not monster_str:
                 continue
             parts = monster_str.split(",")
-            if len(parts) >= 4:
-                x = float(parts[0])
-                y = float(parts[1])
-                type_str = float(parts[2])
-                hp = int(parts[3])
+            if len(parts) >= 5:
+                monster_id = int(parts[0])
+                x = float(parts[1])
+                y = float(parts[2])
+                type_str = float(parts[3])
+                hp = int(parts[4])
                 if type_str == "long":
                     type_str = "gun"
                 else:
                     type_str = "rifle"
 
-                new_monster = Monster(x,y,type_str, hp)
+                new_monster = Monster(x,y,type_str, hp, monster_id)
                 monsters_list.append(new_monster)
 
 
@@ -2357,7 +2359,8 @@ async def handle_neighbor_connection(reader, writer):
                     y = float(parts[2])
                     type_str = parts[3]
                     hp = int(parts[4])
-                    new_monster = Monster(x,y,type_str,hp)
+                    monster_id = int(parts[5])
+                    new_monster = Monster(x,y,type_str,hp, monster_id)
                     monsters_list.append(new_monster)
 
     except Exception as e:
