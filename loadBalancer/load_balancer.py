@@ -245,7 +245,10 @@ async def handle_gs_lifecycle(reader, writer):
                         elif cmd_type == "monster":
                             try:
                                 m_id, mx, my, mtype, mhp = data.split(",")
-                                m_id, mx, my, mhp = int(m_id), int(mx), int(my), int(mhp)
+                                m_id = int(float(m_id))
+                                mx = int(float(mx))
+                                my = int(float(my))
+                                mhp = int(float(mhp))
 
                                 if m_id in monster_manager.state.map_monsters:
                                     monster_manager.state.map_monsters[m_id]["hp"] = mhp

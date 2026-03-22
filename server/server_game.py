@@ -4,7 +4,7 @@ import random
 import psutil
 import heapq
 import time
-
+import os
 from itertools import count
 
 import gs_and_lb_helper_functions
@@ -42,18 +42,39 @@ counter = count()
 monsters_list = []
 SERVER_FPS = 0
 SKILL_COOL_TIME = 12
-SPAWN_X = 128  # adjust to a safe open tile on your map
-SPAWN_Y = 128
 LB_PORT = 8080
 
 MY_IP = gs_and_lb_helper_functions.get_local_ip()
 MY_PORT = 4433
 
+MAP_FILENAME = "map.txt"
 
 def load_map():
     with open("map.txt", "r") as f:
         lines = f.readlines()
     return [list(line.strip()) for line in lines]
+
+
+def get_random_valid_position() -> tuple[int, int]:
+    valid_tiles = []
+
+    if os.path.exists(MAP_FILENAME):
+        try:
+            with open(MAP_FILENAME, "r") as f:
+                game_map = [line.strip() for line in f.readlines()]
+
+            for row_idx, row in enumerate(game_map):
+                for col_idx, tile in enumerate(row):
+                    if tile != "#":
+                        valid_tiles.append((col_idx, row_idx))
+        except Exception as e:
+            print(f"Error reading map file: {e}")
+
+    if valid_tiles:
+        tile_x, tile_y = random.choice(valid_tiles)
+        return tile_x * TILE_SIZE, tile_y * TILE_SIZE
+
+    return TILE_SIZE, TILE_SIZE
 
 
 class GameState:
@@ -455,10 +476,11 @@ class EchoQuicProtocol(QuicConnectionProtocol):
             item_name = parts[1]
             if item_name not in state.players_potions[client_id]:
                 return
-            state.players_potions[client_id].remove(item_name)
+
             if item_name not in state.players_potions[client_id]:
                 return
 
+            state.players_potions[client_id].remove(item_name)
             if item_name == "Potion":
                 state.players_hp[client_id] += UP_HP
                 if state.players_hp[client_id] > 100:
@@ -585,7 +607,11 @@ class EchoQuicProtocol(QuicConnectionProtocol):
         elif data_str == "RESPAWN":
             if not state.players_control[client_id]:
                 return
-            spawn_pos = f"{SPAWN_X},{SPAWN_Y}"
+            if self not in state.active_clients:
+                state.active_clients.add(self)
+
+            x, y = get_random_valid_position()
+            spawn_pos = f"{x},{y}"
             state.players_pos[client_id]       = spawn_pos
             state.players_hp[client_id]        = 100
             state.players_inventory[client_id] = {int(i): {"type": "none", "ammo": 0} for i in range(INVENTORY_SIZE)}
@@ -1171,9 +1197,13 @@ class Skill:
 
 
 class Monster:
-    def __init__(self, x, y,weapon , hp, id):
+    def __init__(self, x, y,weapon_name , hp, id):
         self.hp = hp
-        self.weapon = weapon
+        self.weapon = ["gun", 30, TILE_SIZE]
+        for w in WEAPON_LIST:
+            if w[0] == weapon_name:
+                self.weapon = w
+                break
         self.x = x
         self.y = y
         self.id = id
@@ -1674,7 +1704,7 @@ async def update_game_monsters_from_lb(monsters_string):
                 monster_id = int(parts[0])
                 x = float(parts[1])
                 y = float(parts[2])
-                type_str = float(parts[3])
+                type_str = parts[3]
                 hp = int(parts[4])
                 if type_str == "long":
                     type_str = "gun"
@@ -2109,6 +2139,7 @@ async def register_with_lb_once(lb_ip: str, timeout: float = 5.0) -> bool:
                     monsters = msg.split("|")[7]
 
                     await update_game_monsters_from_lb(monsters)
+                    asyncio.create_task(monsters_manager())
 
 
                     writer.close()
@@ -2399,7 +2430,6 @@ async def main():
     ))
     asyncio.create_task(connect_to_lb())
     asyncio.create_task(check_cpu())
-    asyncio.create_task(monsters_manager())
     asyncio.create_task(track_server_fps())
     peer_server = await asyncio.start_server(handle_neighbor_connection, MY_IP, MY_PORT)
     asyncio.create_task(peer_server.serve_forever())
