@@ -2,12 +2,11 @@ import pygame
 import asyncio
 import threading
 import ssl
-import time
 
 
 def login_client():
     pygame.init()
-    width, height = 800, 600
+    width, height = 1920, 1080
     screen = pygame.display.set_mode((width, height))
     pygame.display.set_caption("MMORPG Client - Secure Connection")
     font = pygame.font.SysFont("Arial", 28, bold=True)
@@ -16,18 +15,20 @@ def login_client():
     # --- משתני מצב ---
     # --- משתני מצב ---
     inputs = {
-        "ip": "",
-        "port": "",
-        "user": "",
-        "pass": "",
-        "confirm_pass": ""
+        "server ip": "",
+        "username": "",
+        "password": "",
+        "confirm_password": ""
     }
-    active_field = "ip"
-    status_msg = "Enter Server IP & Port"
+    active_field = "server ip"
+    status_msg = ""
     state = "SERVER_INFO"
     running = True
     player_data = None
     login_done = False
+
+    img = pygame.image.load("img/loading_screen.png")
+    img = pygame.transform.scale(img, (1920, 1080))
 
     def start_network_thread(request_type):
         nonlocal status_msg, state, active_field, player_data, login_done
@@ -40,7 +41,7 @@ def login_client():
                 context.verify_mode = ssl.CERT_NONE
 
                 reader, writer = await asyncio.open_connection(
-                    inputs["ip"], int(inputs["port"]), ssl=context
+                    inputs["server ip"], int(8820), ssl=context
                 )
 
                 if request_type == "CHECK_CONNECTION":
@@ -53,7 +54,7 @@ def login_client():
                     writer.close()
 
                 else:
-                    message = f"{request_type}:{inputs['user']}:{inputs['pass']}"
+                    message = f"{request_type}:{inputs['username']}:{inputs['password']}"
                     writer.write(message.encode())
                     await writer.drain()
 
@@ -79,11 +80,6 @@ def login_client():
                         status_msg = f"Welcome {player_data['username']}!"
                         print(f"Loaded Player Data: {player_data}")
 
-                        # כאן תוכל לשנות את ה-state ל-"IN_GAME" בעתיד
-                        # state = "IN_GAME"
-                        time.sleep(1.0)
-                        auth_finished = True
-
                     elif reply == "Registration Success":
                         status_msg = "Account Created! Please Login."
                         state = "CHOICE_MENU"
@@ -92,8 +88,12 @@ def login_client():
 
                     writer.close()
                 await writer.wait_closed()
+
             except Exception as e:
-                status_msg = f"Error: {e}"
+                if "refused" in str(e) or "Timeout" in str(e):
+                    status_msg = f"Server is offline. Please try again later."
+                else:
+                    status_msg = f"Error: {e}"
                 state = "SERVER_INFO"
 
         thread = threading.Thread(target=lambda: asyncio.run(network_logic()))
@@ -118,8 +118,8 @@ def login_client():
                         status_msg = "Select Action"
                     elif state == "CHOICE_MENU":
                         state = "SERVER_INFO"
-                        active_field = "ip"
-                        status_msg = "Enter Server IP & Port"
+                        active_field = "server ip"
+                        status_msg = ""
 
                 # --- קלט טקסט ---
                 if state in ["SERVER_INFO", "LOGIN_FORM", "REGISTER_FORM"]:
@@ -127,11 +127,11 @@ def login_client():
                         inputs[active_field] = inputs[active_field][:-1]
                     elif event.key == pygame.K_TAB:
                         if state == "SERVER_INFO":
-                            keys = ["ip", "port"]
+                            keys = ["server ip"]
                         elif state == "LOGIN_FORM":
-                            keys = ["user", "pass"]
+                            keys = ["username", "password"]
                         else:
-                            keys = ["user", "pass", "confirm_pass"]
+                            keys = ["username", "password", "confirm_password"]
                         idx = keys.index(active_field)
                         active_field = keys[(idx + 1) % len(keys)]
                     elif event.unicode.isprintable() and event.unicode != "":
@@ -139,13 +139,13 @@ def login_client():
 
                 # --- אישור (Enter) ---
                 if event.key == pygame.K_RETURN:
-                    if state == "SERVER_INFO" and inputs["ip"] and inputs["port"]:
+                    if state == "SERVER_INFO" and inputs["server ip"]:
                         state = "CONNECTING"
                         start_network_thread("CHECK_CONNECTION")
-                    elif state == "LOGIN_FORM" and inputs["user"] and inputs["pass"]:
+                    elif state == "LOGIN_FORM" and inputs["username"] and inputs["password"]:
                         start_network_thread("LOGIN")
-                    elif state == "REGISTER_FORM" and inputs["user"] and inputs["pass"]:
-                        if inputs["pass"] == inputs["confirm_pass"]:
+                    elif state == "REGISTER_FORM" and inputs["username"] and inputs["password"]:
+                        if inputs["password"] == inputs["confirm_password"]:
                             start_network_thread("REGISTER")
                         else:
                             status_msg = "Error: Passwords do not match!"
@@ -153,40 +153,36 @@ def login_client():
                 # --- בחירה בתפריט ---
                 if state == "CHOICE_MENU":
                     if event.key == pygame.K_l:
-                        state, active_field = "LOGIN_FORM", "user"
+                        state, active_field = "LOGIN_FORM", "username"
                         status_msg = "Enter credentials"
                     elif event.key == pygame.K_r:
-                        state, active_field = "REGISTER_FORM", "user"
+                        state, active_field = "REGISTER_FORM", "username"
                         status_msg = "Create new account"
 
         # --- ציור ---
-        screen.fill((240, 240, 240))
+        screen.fill((0, 0, 0))
+        screen.blit(img, (0, 0))
+
         center_x = width // 2
 
         if state == "CHOICE_MENU":
-            label = font.render("MAIN MENU", True, (0, 0, 0))
-            screen.blit(label, label.get_rect(center=(center_x, 150)))
             l_text = font.render("[L] Login to existing account", True, (50, 150, 255))
             r_text = font.render("[R] Register new account", True, (50, 150, 255))
-            screen.blit(l_text, l_text.get_rect(center=(center_x, 280)))
-            screen.blit(r_text, r_text.get_rect(center=(center_x, 350)))
+            screen.blit(l_text, l_text.get_rect(center=(center_x, 430)))
+            screen.blit(r_text, r_text.get_rect(center=(center_x, 500)))
 
-        elif state in ["SERVER_INFO", "LOGIN_FORM", "REGISTER_FORM", "CONNECTING"]:
-            if state in ["SERVER_INFO", "CONNECTING"]:
-                fields = ["ip", "port"]
-            elif state == "LOGIN_FORM":
-                fields = ["user", "pass"]
-            else:
-                fields = ["user", "pass", "confirm_pass"]
+            status_color = (200, 0, 0) if "Error" in status_msg or "Failed" in status_msg else (0, 150, 0)
+            status_surf = font.render(status_msg, True, status_color)
+            screen.blit(status_surf, status_surf.get_rect(center=(center_x, 630)))
 
-            title = state.replace("_", " ")
-            title_surf = font.render(title, True, (0, 0, 0))
-            screen.blit(title_surf, title_surf.get_rect(center=(center_x, 60)))
+
+        elif state in ["SERVER_INFO", "CONNECTING"]:
+            fields = ["server ip"]
 
             for i, key in enumerate(fields):
                 color = (50, 150, 255) if active_field == key else (50, 50, 50)
                 lbl = font.render(f"{key.upper()}:", True, (0, 0, 0))
-                y_pos = 140 + i * 110
+                y_pos = 420 + i * 110
                 screen.blit(lbl, lbl.get_rect(center=(center_x, y_pos)))
 
                 rect = pygame.Rect(0, 0, 400, 45)
@@ -198,15 +194,62 @@ def login_client():
                 val_surf = font.render(txt, True, (0, 0, 0))
                 screen.blit(val_surf, val_surf.get_rect(center=rect.center))
 
+            status_color = (200, 0, 0) if "Error" in status_msg or "Failed" in status_msg else (0, 150, 0)
+            status_surf = font.render(status_msg, True, status_color)
+            screen.blit(status_surf, status_surf.get_rect(center=(center_x, 630)))
+
+
+        elif state == "LOGIN_FORM":
+            fields = ["username", "password"]
+
+            for i, key in enumerate(fields):
+                color = (50, 150, 255) if active_field == key else (50, 50, 50)
+                lbl = font.render(f"{key.upper()}:", True, (0, 0, 0))
+                y_pos = 420 + i * 110
+                screen.blit(lbl, lbl.get_rect(center=(center_x, y_pos)))
+
+                rect = pygame.Rect(0, 0, 400, 45)
+                rect.center = (center_x, y_pos + 45)
+                pygame.draw.rect(screen, (220, 220, 220), rect, 0, border_radius=5)
+                pygame.draw.rect(screen, color, rect, 2, border_radius=5)
+
+                txt = "*" * len(inputs[key]) if "pass" in key else inputs[key]
+                val_surf = font.render(txt, True, (0, 0, 0))
+                screen.blit(val_surf, val_surf.get_rect(center=rect.center))
+
+            status_color = (200, 0, 0) if "Error" in status_msg or "Failed" in status_msg else (0, 150, 0)
+            status_surf = font.render(status_msg, True, status_color)
+            screen.blit(status_surf, status_surf.get_rect(center=(center_x, 660)))
+
+
+        elif state == "REGISTER_FORM":
+            fields = ["username", "password", "confirm_password"]
+
+            for i, key in enumerate(fields):
+                color = (50, 150, 255) if active_field == key else (50, 50, 50)
+                lbl = font.render(f"{key.upper()}:", True, (0, 0, 0))
+                y_pos = 350 + i * 110
+                screen.blit(lbl, lbl.get_rect(center=(center_x, y_pos)))
+
+                rect = pygame.Rect(0, 0, 400, 45)
+                rect.center = (center_x, y_pos + 45)
+                pygame.draw.rect(screen, (220, 220, 220), rect, 0, border_radius=5)
+                pygame.draw.rect(screen, color, rect, 2, border_radius=5)
+
+                txt = "*" * len(inputs[key]) if "pass" in key else inputs[key]
+                val_surf = font.render(txt, True, (0, 0, 0))
+                screen.blit(val_surf, val_surf.get_rect(center=rect.center))
+
+            status_color = (200, 0, 0) if "Error" in status_msg or "Failed" in status_msg else (0, 150, 0)
+            status_surf = font.render(status_msg, True, status_color)
+            screen.blit(status_surf, status_surf.get_rect(center=(center_x, 680)))
+
+
         # הצגת הוראת חזרה (ESC) בפינה
         if state != "SERVER_INFO":
-            back_hint = pygame.font.SysFont("Arial", 18).render("ESC: Back", True, (100, 100, 100))
+            back_hint = pygame.font.SysFont("Arial", 25).render("ESC: Back", True, (255, 255, 255), (0, 0, 0))
             screen.blit(back_hint, (20, 20))
 
-        # סטטוס
-        status_color = (200, 0, 0) if "Error" in status_msg or "Failed" in status_msg else (0, 150, 0)
-        status_surf = font.render(status_msg, True, status_color)
-        screen.blit(status_surf, status_surf.get_rect(center=(center_x, 540)))
 
         pygame.display.flip()
         clock.tick(30)

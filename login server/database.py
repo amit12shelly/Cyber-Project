@@ -1,44 +1,74 @@
-import sqlite3
-import hashlib
+#import sqlite3
+#import hashlib
 import time
+import random
+import os
+import secrets
 from typing import Optional, Dict, Any
+import bcrypt
 
+from sqlalchemy import create_engine, Column, Integer, String, ForeignKey
+from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 # =========================
 # Database Configuration
 # =========================
 
 # SQLite database file name
 DB_NAME = "game.db"
+MAP_FILENAME = "map.txt"
+TILE_SIZE = 64
+
+#creates connection to DB
+# session creator that connects to the engine and creates the session through the connection of the engine to the DB
+#the base is for the sqlalcheny to understand its a table
+engine = create_engine(f"sqlite:///{DB_NAME}", echo=False)
+SessionLocal = sessionmaker(bind=engine)
+Base = declarative_base()
 
 
 # ==================================================
 # hash_password
 # --------------------------------------------------
-# Hashes a plain-text password using SHA-256.
+# Hashes a plain-text password using bycrypt
 # The hash is stored in the database instead of
 # the original password for security reasons.
 #
-# NOTE:
-# This is a basic implementation.
-# In production systems, a salted and iterated
-# hashing algorithm (e.g., bcrypt) should be used.
-# ==================================================
+# =================================================
 def hash_password(password: str) -> str:
-    return hashlib.sha256(password.encode()).hexdigest()
+     salt = bcrypt.gensalt()
+     hashed = bcrypt.hashpw(password.encode(), salt)
+     return hashed.decode()
+
 
 
 # ==================================================
-# get_conn
+# get_random_valid_position
 # --------------------------------------------------
-# Creates and returns a new connection to the SQLite
-# database.
-#
-# Each database operation opens and closes its own
-# connection to keep the logic simple and isolated.
+# סורקת את קובץ המפה ומחזירה קואורדינטות (x, y)
+# של אריח שאינו קיר (#).
 # ==================================================
-def get_conn():
-    return sqlite3.connect(DB_NAME)
+def get_random_valid_position() -> tuple[int, int]:
+    valid_tiles = []
 
+    if os.path.exists(MAP_FILENAME):
+        try:
+            with open(MAP_FILENAME, "r") as f:
+                game_map = [line.strip() for line in f.readlines()]
+
+            for row_idx, row in enumerate(game_map):
+                for col_idx, tile in enumerate(row):
+                    if tile != "#":
+                        valid_tiles.append((col_idx, row_idx))
+        except Exception as e:
+            print(f"Error reading map file: {e}")
+
+    if valid_tiles:
+        tile_x, tile_y = random.choice(valid_tiles)
+        # מחזיר את המיקום בפיקסלים (עולם המשחק)
+        return tile_x * TILE_SIZE, tile_y * TILE_SIZE
+
+    # ברירת מחדל אם המפה לא נמצאה או לא תקינה
+    return TILE_SIZE, TILE_SIZE
 
 # ==================================================
 # init_db
@@ -52,19 +82,17 @@ def get_conn():
 # - inventory   : Stores player inventory items
 # ==================================================
 def init_db():
-    conn = get_conn()
-    cur = conn.cursor()
+    Base.metadata.create_all(engine)
 
+def verify_password(password: str, hashed: str) -> bool:
+    return bcrypt.checkpw(password.encode(), hashed.encode())
     # ---------------- Players Table ----------------
     # Stores login credentials and persistent player data
     cur.execute("""
     CREATE TABLE IF NOT EXISTS players (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id INTEGER PRIMARY KEY,
         username TEXT UNIQUE NOT NULL,
         password_hash TEXT NOT NULL,
-        level INTEGER DEFAULT 1,
-        exp INTEGER DEFAULT 0,
-        gold INTEGER DEFAULT 0,
         created_at INTEGER
     )
     """)
@@ -73,31 +101,29 @@ def init_db():
     # Stores the in-game character state for each player
     # One character per player (player_id is UNIQUE)
     cur.execute("""
-    CREATE TABLE IF NOT EXISTS characters (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        player_id INTEGER UNIQUE,
-        x INTEGER DEFAULT 0,
-        y INTEGER DEFAULT 0,
-        hp INTEGER DEFAULT 100,
-        mp INTEGER DEFAULT 50,
-        last_save INTEGER,
-        FOREIGN KEY(player_id) REFERENCES players(id)
-    )
-    """)
+        CREATE TABLE IF NOT EXISTS characters (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            player_id INTEGER UNIQUE,
+            x INTEGER DEFAULT 0,
+            y INTEGER DEFAULT 0,
+            hp INTEGER DEFAULT 100,
+            last_save INTEGER,
+            FOREIGN KEY(player_id) REFERENCES players(id)
+        )
+        """)
 
     # ---------------- Inventory Table ----------------
     # Stores all items owned by a player
     cur.execute("""
-    CREATE TABLE IF NOT EXISTS inventory (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        player_id INTEGER NOT NULL,
-        slot INTEGER NOT NULL CHECK(slot >= 0 AND slot < 10),
-        item_name TEXT,
-        amount INTEGER DEFAULT 0,
-        FOREIGN KEY(player_id) REFERENCES players(id),
-        UNIQUE(player_id, slot)
-    );
-    """)
+        CREATE TABLE IF NOT EXISTS inventory (
+            player_id INTEGER NOT NULL,
+            slot INTEGER NOT NULL CHECK(slot >= 0 AND slot < 11), 
+            item_type TEXT NOT NULL,    -- למשל: 'AK47', 'Pistol', 'HP_Potion'
+            ammo INTEGER DEFAULT 0,     -- רלוונטי לנשקים, בשיקויים יהיה 0
+            FOREIGN KEY(player_id) REFERENCES players(id),
+            UNIQUE(player_id, slot)     -- מונע כפל פריטים באותו סלוט
+        );
+        """)
 
     conn.commit()
     conn.close()
@@ -121,33 +147,44 @@ def init_db():
 # - False -> username already exists
 # ==================================================
 def register(username: str, password: str) -> bool:
-    try:
-        conn = get_conn()
-        cur = conn.cursor()
+     session = SessionLocal()
 
-        # Insert new player
-        cur.execute(
-            "INSERT INTO players (username, password_hash, created_at) VALUES (?, ?, ?)",
-            (username, hash_password(password), int(time.time()))
-        )
+     try:
+         existing = session.query(Player).filter_by(username=username).first()
+         if existing:
+             return False
 
-        player_id = cur.lastrowid
+         secure_id = secrets.randbits(31)
+         start_x, start_y = get_random_valid_position()
 
-        # Create default character for the player
-        cur.execute(
-            "INSERT INTO characters (player_id, last_save) VALUES (?, ?)",
-            (player_id, int(time.time()))
-        )
+         player = Player(
+             id=secure_id,
+             username=username,
+             password_hash=hash_password(password),
+             created_at=int(time.time())
+         )
 
-        conn.commit()
-        conn.close()
-        return True
+         character = Character(
+             player_id=secure_id,
+             x=start_x,
+             y=start_y,
+             hp=100,
+             last_save=int(time.time())
+         )
 
-    except sqlite3.IntegrityError:
-        # Triggered when username already exists
-        return False
+         session.add(player)
+         session.add(character)
+         session.commit()
 
+         return True
 
+     except Exception as e:
+         print("Register error:", e)
+         session.rollback()
+         return False
+
+     finally:
+         session.close()
 # ==================================================
 # login
 # --------------------------------------------------
@@ -160,22 +197,23 @@ def register(username: str, password: str) -> bool:
 # Returns:
 # - player_id (int) if credentials are valid
 # - None if authentication fails
-# ==================================================
-def login(username: str, password: str) -> Optional[int]:
-    conn = get_conn()
-    cur = conn.cursor()
+#=================================================
+def login(username: str, password: str):
+    session = SessionLocal()
 
-    cur.execute(
-        "SELECT id FROM players WHERE username=? AND password_hash=?",
-        (username, hash_password(password))
-    )
+    try:
+        player = session.query(Player).filter_by(username=username).first()
 
-    row = cur.fetchone()
-    conn.close()
+        if not player:
+            return None
 
-    return row[0] if row else None
+        if verify_password(password, player.password_hash):
+            return player.id
 
+        return None
 
+    finally:
+        session.close()
 # ==================================================
 # load_player
 # --------------------------------------------------
@@ -190,45 +228,67 @@ def login(username: str, password: str) -> Optional[int]:
 # - account data
 # - character state
 # - inventory
-# ==================================================
-def load_player(player_id: int) -> Dict[str, Any]:
-    conn = get_conn()
-    cur = conn.cursor()
+#==================================================
 
-    # Load basic player data
-    cur.execute(
-        "SELECT username, level, exp, gold FROM players WHERE id=?",
-        (player_id,)
-    )
-    p = cur.fetchone()
+class Player(Base):
+    __tablename__ = "players"
 
-    # Load character state
-    cur.execute(
-        "SELECT x, y, hp, mp FROM characters WHERE player_id=?",
-        (player_id,)
-    )
-    c = cur.fetchone()
+    id = Column(Integer, primary_key=True)
+    username = Column(String, unique=True, nullable=False)
+    password_hash = Column(String, nullable=False)
+    created_at = Column(Integer)
 
-    # Load inventory
-    cur.execute(
-        "SELECT item_name, amount FROM inventory WHERE player_id=?",
-        (player_id,)
-    )
-    inv = cur.fetchall()
+    character = relationship("Character", back_populates="player", uselist=False)
 
-    conn.close()
+
+class Character(Base):
+    __tablename__ = "characters"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    player_id = Column(Integer, ForeignKey("players.id"), unique=True)
+    x = Column(Integer, default=0)
+    y = Column(Integer, default=0)
+    hp = Column(Integer, default=100)
+    last_save = Column(Integer)
+
+    player = relationship("Player", back_populates="character")
+
+
+class Inventory(Base):
+    __tablename__ = "inventory"
+
+    id = Column(Integer, primary_key=True)
+    player_id = Column(Integer, ForeignKey("players.id"))
+    slot = Column(Integer)
+    item_type = Column(String)
+    ammo = Column(Integer, default=0)
+
+def load_player(player_id: int):
+    session = SessionLocal()
+
+    player = session.query(Player).filter_by(id=player_id).first()
+    character = session.query(Character).filter_by(player_id=player_id).first()
+    inventory_items = session.query(Inventory).filter_by(player_id=player_id).all()
+
+    session.close()
+
+    if not player or not character:
+        return {}
+
+    inventory_dict = {}
+    for item in inventory_items:
+        inventory_dict[item.slot] = {
+            "type": item.item_type,
+            "ammo": item.ammo
+        }
 
     return {
         "player_id": player_id,
-        "username": p[0],
-        "level": p[1],
-        "exp": p[2],
-        "gold": p[3],
-        "x": c[0],
-        "y": c[1],
-        "hp": c[2],
-        "mp": c[3],
-        "inventory": {name: amount for name, amount in inv}
+        "username": player.username,
+        "x": character.x,
+        "y": character.y,
+        "hp": character.hp,
+        "inventory": inventory_dict
     }
 
 
@@ -242,34 +302,34 @@ def load_player(player_id: int) -> Dict[str, Any]:
 #
 # Parameters:
 # - state : dictionary containing player state
-# ==================================================
-def save_player(state: Dict[str, Any]):
-    conn = get_conn()
-    cur = conn.cursor()
+#==================================================
+def save_player(state):
+    session = SessionLocal()
 
-    # Update player stats
-    cur.execute(
-        "UPDATE players SET level=?, exp=?, gold=? WHERE id=?",
-        (state["level"], state["exp"], state["gold"], state["player_id"])
-    )
+    try:
+        character = session.query(Character).filter_by(player_id=state["player_id"]).first()
 
-    # Update character state
-    cur.execute(
-        "UPDATE characters SET x=?, y=?, hp=?, mp=?, last_save=? WHERE player_id=?",
-        (state["x"], state["y"], state["hp"], state["mp"], int(time.time()), state["player_id"])
-    )
+        character.x = state["x"]
+        character.y = state["y"]
+        character.hp = state["hp"]
+        character.last_save = int(time.time())
 
-    # Replace inventory (simple but safe approach)
-    cur.execute(
-        "DELETE FROM inventory WHERE player_id=?",
-        (state["player_id"],)
-    )
+        session.query(Inventory).filter_by(player_id=state["player_id"]).delete()
 
-    for item, amount in state["inventory"].items():
-        cur.execute(
-            "INSERT INTO inventory (player_id, item_name, amount) VALUES (?, ?, ?)",
-            (state["player_id"], item, amount)
-        )
+        for slot, data in state["inventory"].items():
+            item = Inventory(
+                player_id=state["player_id"],
+                slot=slot,
+                item_type=data["type"],
+                ammo=data["ammo"]
+            )
+            session.add(item)
 
-    conn.commit()
-    conn.close()
+        session.commit()
+
+    except Exception as e:
+        print("Save error:", e)
+        session.rollback()
+
+    finally:
+        session.close()
