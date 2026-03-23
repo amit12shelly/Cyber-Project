@@ -555,8 +555,8 @@ class Player:
         left_1  = pygame.transform.flip(right_1, True, False)
         self.base_sprites = {
             "up":    [
-                pygame.transform.scale(pygame.image.load("img/upSprite.png"), (64, 64)),
-                pygame.transform.scale(pygame.image.load("img/upSprite.png"), (64, 64)),
+                pygame.transform.scale(pygame.image.load("img/1.png"), (64, 64)),
+                pygame.transform.scale(pygame.image.load("img/2.png"), (64, 64)),
             ],
             "down":  [
                 pygame.transform.scale(pygame.image.load("img/down_1.png"), (64, 64)),
@@ -990,6 +990,7 @@ def main():
         chat_input = ""
         chat_messages = []
         is_dead = False
+        respawn_sent = False
         death_font_title = pygame.font.SysFont("arial", 48, bold=True)
         death_font_btn = pygame.font.SysFont("arial", 22)
         start_quic_thread(servers[0].ip, servers[0].port)
@@ -1370,6 +1371,7 @@ def main():
                     bullets.clear()
                     monsters.clear()
                     is_dead = False
+                    respawn_sent = False
                     outgoing_messages.put(f"UPDATE|{player.x},{player.y}")
 
 
@@ -1549,7 +1551,8 @@ def main():
 
             if is_dead:
                 action = draw_death_screen(screen, death_font_title, death_font_btn, pygame.mouse.get_pos())
-                if action == "respawn":
+                if action == "respawn" and not respawn_sent:
+                    respawn_sent = True
                     outgoing_messages.put("RESPAWN")
                 elif action == "quit":
                     outgoing_messages.put("Disconnected")
