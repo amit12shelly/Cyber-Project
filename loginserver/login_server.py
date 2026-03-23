@@ -1,4 +1,5 @@
 import asyncio
+import os
 import ssl
 import database
 import secrets
@@ -8,7 +9,7 @@ IP = "0.0.0.0"
 PORT = 8820
 INTERNAL_PORT = 8821
 
-LB_IP = "127.0.0.1"
+LB_IP = os.getenv('LB_IP')
 LB_PORT = 8080
 
 active_sessions = {}

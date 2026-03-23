@@ -9,8 +9,10 @@ services:
       - "8433:8433"
     environment:
       - LB_IP=192.168.5.87
-      - HOST_IP=192.168.5.87
       - MY_PORT=4433
+      - MY_PUBLIC_IP=192.168.5.87
+    extra_hosts:
+      - "lb:192.168.5.87"
 
   game-server-2:
     build: ./server
@@ -20,8 +22,10 @@ services:
       - "8434:8434"     # (4434 + 4000)
     environment:
       - LB_IP=192.168.5.87
-      - HOST_IP=192.168.5.87
       - MY_PORT=4434
+      - MY_PUBLIC_IP=192.168.5.87
+    extra_hosts:
+      - "lb:192.168.5.87"
 
   game-server-3:
     build: ./server
@@ -31,5 +35,7 @@ services:
       - "8435:8435"     # (4435 + 4000)
     environment:
       - LB_IP=192.168.5.87
-      - HOST_IP=192.168.5.87
       - MY_PORT=4435
+      - MY_PUBLIC_IP=192.168.5.87
+    extra_hosts:
+      - "lb:192.168.5.87"

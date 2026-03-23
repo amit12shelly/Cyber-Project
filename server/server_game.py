@@ -43,9 +43,11 @@ monsters_list = []
 SERVER_FPS = 0
 SKILL_COOL_TIME = 12
 LB_PORT = 8080
+lb_ip = os.getenv('LB_IP')
 
 MY_IP = gs_and_lb_helper_functions.get_local_ip()
-MY_PORT = 4433
+MY_PUBLIC_IP = os.getenv('MY_PUBLIC_IP', MY_IP)
+MY_PORT = int(os.getenv('MY_PORT'))
 
 MAP_FILENAME = "map.txt"
 
@@ -1822,7 +1824,7 @@ async def connect_to_lb():
             reader, writer = await asyncio.open_connection(state.lb_host, state.lb_port , limit=1024 * 1024 * 10)
             state.lb_writer = writer
 
-            connect_msg = f"Server connect|{MY_IP}|{psutil.cpu_percent()}|{MY_PORT}\n"
+            connect_msg = f"Server connect|{MY_PUBLIC_IP}|{psutil.cpu_percent()}|{MY_PORT}\n"
 
             writer.write(connect_msg.encode())
             await writer.drain()
@@ -2401,9 +2403,10 @@ async def handle_neighbor_connection(reader, writer):
         await writer.wait_closed()
 
 async def main():
+    global lb_ip
+
     while True:
-        lb_ip = await asyncio.to_thread(input, "Enter Load Balancer IP (default 127.0.0.1): ")
-        lb_ip = lb_ip.strip() or "127.0.0.1"
+
 
         ok = await register_with_lb_once(lb_ip, timeout=5.0)
         if ok:
@@ -2423,15 +2426,15 @@ async def main():
     config.load_cert_chain("cert.pem", "key.pem")
     print("Starting QUIC server on udp:0.0.0.0:4433")
     asyncio.create_task(serve(
-        host=MY_IP,
-        port=MY_PORT,
+        host= "0.0.0.0",
+        port=int(MY_PORT),
         configuration=config,
         create_protocol=EchoQuicProtocol,
     ))
     asyncio.create_task(connect_to_lb())
     asyncio.create_task(check_cpu())
     asyncio.create_task(track_server_fps())
-    peer_server = await asyncio.start_server(handle_neighbor_connection, MY_IP, MY_PORT)
+    peer_server = await asyncio.start_server(handle_neighbor_connection, "0.0.0.0", int(MY_PORT) + 4000)
     asyncio.create_task(peer_server.serve_forever())
     print(f"[*] Started TCP Peer-to-Peer server on {MY_IP}:{MY_PORT}")
     await asyncio.Future()
