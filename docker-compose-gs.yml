@@ -1,14 +1,41 @@
 version: '3.8'
 
 services:
-  game-server:
+  game-server-1:
     build: ./server
     restart: always
     ports:
-    - "4433-4483:4433/udp"
+      - "4433:4433/udp"
+      - "8433:8433"
+    environment:
+      - LB_IP=192.168.5.87
+      - MY_PORT=4433
+      - MY_PUBLIC_IP=192.168.5.87
     extra_hosts:
-      - "my-database:192.168.1.10"
-      - "my-login-server:192.168.1.10"
-    deploy:
-      mode: replicated
-      replicas: 50
+      - "lb:192.168.5.87"
+
+  game-server-2:
+    build: ./server
+    restart: always
+    ports:
+      - "4434:4434/udp"
+      - "8434:8434"     # (4434 + 4000)
+    environment:
+      - LB_IP=192.168.5.87
+      - MY_PORT=4434
+      - MY_PUBLIC_IP=192.168.5.87
+    extra_hosts:
+      - "lb:192.168.5.87"
+
+  game-server-3:
+    build: ./server
+    restart: always
+    ports:
+      - "4435:4435/udp"
+      - "8435:8435"     # (4435 + 4000)
+    environment:
+      - LB_IP=192.168.5.87
+      - MY_PORT=4435
+      - MY_PUBLIC_IP=192.168.5.87
+    extra_hosts:
+      - "lb:192.168.5.87"

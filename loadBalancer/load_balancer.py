@@ -1,4 +1,5 @@
 import asyncio
+import os
 import time
 
 import server
@@ -11,7 +12,7 @@ LB_IP = "0.0.0.0"
 LB_PORT = 8080
 HEARTBEAT_TIMEOUT = 15
 
-LOGIN_SERVER_IP = "127.0.0.1"
+LOGIN_SERVER_IP = os.getenv('LOGIN_IP')
 LOGIN_SERVER_PORT = 8821
 
 MAP_NAME = "map.txt"
