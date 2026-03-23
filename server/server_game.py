@@ -302,13 +302,13 @@ class EchoQuicProtocol(QuicConnectionProtocol):
                     print("Error while splitting the pos in the ATTACK command!")
                     return
                 angle = float(parts[2])
-                angle_rad = math.radians(angle)
-                center_x = float(x_str) + 32 + math.cos(angle_rad) * 20
-                center_y = float(y_str) + 32 + math.sin(angle_rad) * 20 -8
+
+                center_x = float(x_str) + 32
+                center_y = float(y_str) + 32
 
                 state.active_bullets[new_id] = {
-                    "x": center_x,
-                    "y": center_y,
+                    "x": center_x + 28,
+                    "y": center_y - 8,
                     "angle": angle,
                 }
 
@@ -1436,6 +1436,72 @@ def check_movement(new_pos, old_pos, skill):
                 return True
     return False
 
+
+
+def spawn_random_monsters(amount):
+    tiles_high = len(state.game_map)
+    tiles_wide = len(state.game_map[0])
+    global monsters_list
+    monsters_list = []
+    spawned = 0
+    while spawned < amount:
+        tile_x = random.randint(0, tiles_wide - 1)
+        tile_y = random.randint(0, tiles_high - 1)
+        if state.game_map[tile_y][tile_x] == ".":
+            pixel_x = float(tile_x * TILE_SIZE)
+            pixel_y = float(tile_y * TILE_SIZE)
+            monster = Monster(pixel_x, pixel_y, 100)
+            monsters_list.append(monster)
+            spawned += 1
+    print(f"Server initialized with {spawned} monsters on the map.")
+
+def spawn_loot_per_camera_zone(game_map, per_zone=2):
+    loot_list = []
+    tiles_wide = len(game_map[0])
+    tiles_high = len(game_map)
+    zone_tiles_x = SCREEN_WIDTH // TILE_SIZE
+    zone_tiles_y = SCREEN_HEIGHT // TILE_SIZE
+    for win_y in range(0, tiles_high, zone_tiles_y):
+        for win_x in range(0, tiles_wide, zone_tiles_x):
+            spawned = 0
+            attempts = 0
+            while spawned < per_zone and attempts < 50:
+                attempts += 1
+                tile_x = random.randint(win_x, min(win_x + zone_tiles_x - 1, tiles_wide - 1))
+                tile_y = random.randint(win_y, min(win_y + zone_tiles_y - 1, tiles_high - 1))
+                if game_map[tile_y][tile_x] != "#":
+                    x = tile_x * TILE_SIZE
+                    y = tile_y * TILE_SIZE
+                    name = random.choice(WEAPON_NAMES)
+                    loot_list.append((x, y, name))
+                    new_id = random.randint(1, int(MAX_WEAPONS))
+                    while new_id in state.map_weapons:
+                        new_id = random.randint(1, int(MAX_WEAPONS))
+                    state.map_weapons[new_id] = {"x": x, "y": y, "type": name}
+                    spawned += 1
+
+def spawn_potions_per_camera_zone(game_map, per_zone=2):
+    tiles_wide = len(game_map[0])
+    tiles_high = len(game_map)
+    zone_tiles_x = SCREEN_WIDTH // TILE_SIZE
+    zone_tiles_y = SCREEN_HEIGHT // TILE_SIZE
+    for win_y in range(0, tiles_high, zone_tiles_y):
+        for win_x in range(0, tiles_wide, zone_tiles_x):
+            spawned = 0
+            attempts = 0
+            while spawned < per_zone and attempts < 50:
+                attempts += 1
+                tile_x = random.randint(win_x, min(win_x + zone_tiles_x - 1, tiles_wide - 1))
+                tile_y = random.randint(win_y, min(win_y + zone_tiles_y - 1, tiles_high - 1))
+                if game_map[tile_y][tile_x] != "#":
+                    x = tile_x * TILE_SIZE
+                    y = tile_y * TILE_SIZE
+                    new_id = random.randint(1, int(MAX_POTION))
+                    while new_id in state.map_potion:
+                        new_id = random.randint(1, int(MAX_POTION))
+                    item = POTION_LIST[0]
+                    state.map_potion[new_id] = {"x": x, "y": y, "type": item[0]}
+                    spawned += 1
 
 async def monsters_manager():
     global monsters_list
