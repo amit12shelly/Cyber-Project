@@ -6,9 +6,9 @@ COPY . /loadBalncer
 
 WORKDIR /loadBalncer
 
-EXPOSE 4433
+EXPOSE 8080
 
 RUN pip install aioquic
 
 
-CMD ["python", "main.py"]
+CMD ["python", "load_balancer.py"]

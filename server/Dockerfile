@@ -11,5 +11,5 @@ EXPOSE 4433
 RUN pip install aioquic
 RUN pip install psutil
 
-
+CMD ["python", "generate_certs.py"]
 CMD ["python", "server_game.py"]
