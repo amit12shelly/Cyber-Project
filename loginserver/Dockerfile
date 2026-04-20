@@ -13,5 +13,4 @@ RUN pip install psutil
 RUN pip install bcrypt
 RUN pip install SQLAlchemy
 
-CMD ["python", "generate_certs.py"]
 CMD ["python", "login_server.py"]
