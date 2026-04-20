@@ -2,9 +2,25 @@ import pygame
 import asyncio
 import threading
 import ssl
+import json
+import os
+
+def load_config():
+    filename = "config.json"
+    default_config = {"login_server_ip": "127.0.0.1", "login_server_port": 8820}
+
+    if os.path.exists(filename):
+        try:
+            with open(filename, "r") as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Error loading config: {e}")
+    return default_config
 
 
 def login_client():
+    config = load_config()
+
     pygame.init()
     width, height = 1920, 1080
     screen = pygame.display.set_mode((width, height))
@@ -15,14 +31,14 @@ def login_client():
     # --- משתני מצב ---
     # --- משתני מצב ---
     inputs = {
-        "server ip": "",
+        "server ip": config["login_server_ip"],  # <--- טעינה אוטומטית כאן
         "username": "",
         "password": "",
         "confirm_password": ""
     }
-    active_field = "server ip"
+    active_field = "username"
     status_msg = ""
-    state = "SERVER_INFO"
+    state = "CHOICE_MENU"
     running = True
     player_data = None
     login_done = False
