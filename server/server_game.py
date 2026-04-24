@@ -607,7 +607,7 @@ class EchoQuicProtocol(QuicConnectionProtocol):
 
         # RESPAWN
         elif data_str == "RESPAWN":
-            if not state.players_control[client_id]:
+            if not state.players_control.get(client_id, True):
                 return
             if self not in state.active_clients:
                 state.active_clients.add(self)
