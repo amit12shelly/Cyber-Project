@@ -6,7 +6,7 @@ SCREEN_HEIGHT = 1080
 TILE_SIZE = 64
 
 MONSTER_TYPES = ["long", "short"]
-MAX_MONSTERS = 100
+MAX_MONSTERS = 5000
 
 
 class GlobalState:
@@ -22,7 +22,7 @@ class GlobalState:
 state = GlobalState()
 
 
-def spawn_monsters(game_map, total_to_spawn=100):
+def spawn_monsters(game_map, total_to_spawn=MAX_MONSTERS):
     """
     מייצר כמות מוגדרת ומדויקת של מפלצות בכל המפה
     """
@@ -65,7 +65,7 @@ def spawn_single_monster(game_map):
     tiles_wide = len(game_map[0])
     tiles_high = len(game_map)
 
-    for _ in range(100):
+    for _ in range(MAX_MONSTERS):
         tile_x = random.randint(0, tiles_wide - 1)
         tile_y = random.randint(0, tiles_high - 1)
 

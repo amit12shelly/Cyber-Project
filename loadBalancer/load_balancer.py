@@ -400,7 +400,7 @@ async def main():
 
         weapons_manager.spawn_loot_per_camera_zone(game_map, per_zone=2)
         potions_manager.spawn_potions_per_camera_zone(game_map, per_zone=2)
-        monster_manager.spawn_monsters(game_map, total_to_spawn=100)
+        monster_manager.spawn_monsters(game_map)
 
         print(f"[*] World populated: {len(weapons_manager.state.map_weapons)} weapons, "
               f"{len(potions_manager.state.map_potions)} potions.")
