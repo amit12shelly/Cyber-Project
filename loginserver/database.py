@@ -21,7 +21,7 @@ TILE_SIZE = 64
 #creates connection to DB
 # session creator that connects to the engine and creates the session through the connection of the engine to the DB
 #the base is for the sqlalcheny to understand its a table
-engine = create_engine(f"sqlite:///{DB_NAME}", echo=False)
+engine = create_engine("sqlite:///:memory:", echo=False)
 SessionLocal = sessionmaker(bind=engine)
 Base = declarative_base()
 

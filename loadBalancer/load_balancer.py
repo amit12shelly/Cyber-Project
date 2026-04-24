@@ -19,7 +19,7 @@ MAP_NAME = "map.txt"
 
 servers = []
 next_server_id = 0
-
+connected_players = set()
 
 async def forward_save_to_login(message):
     try:
@@ -134,9 +134,11 @@ def print_current_map_state():
         print("[Status] No active servers.")
         return
 
+    print(f"\n WORLD STATUS | Active Players: {len(connected_players)} | Servers: {len(servers)}")
+
     print("\n" + "=" * 60)
     print(f" CURRENT WORLD MAP DIVISION (Total Width: {WIDTH})")
-    print("-" * 60)
+    print("-" * 60 + "\n")
 
     sorted_servers = sorted(servers, key=lambda s: s.get_x_min())
 
@@ -192,11 +194,15 @@ async def handle_gs_lifecycle(reader, writer):
 
             elif parts[0] == "CONNECT":
                 if len(parts) >= 2:
+                    player_id = parts[1]
+                    connected_players.add(player_id)
                     print(f"[*] Forwarding CONNECT for Player {parts[1]}")
                     asyncio.create_task(forward_save_to_login(data))
 
             elif parts[0] == "DISCONNECT":
                 if len(parts) >= 2:
+                    player_id = parts[1]
+                    connected_players.discard(player_id)
                     print(f"[*] Forwarding DISCONNECT for Player {parts[1]}")
                     asyncio.create_task(forward_save_to_login(data))
 
@@ -394,7 +400,7 @@ async def main():
 
         weapons_manager.spawn_loot_per_camera_zone(game_map, per_zone=2)
         potions_manager.spawn_potions_per_camera_zone(game_map, per_zone=2)
-        monster_manager.spawn_monsters_per_camera_zone(game_map, per_zone=1)
+        monster_manager.spawn_monsters(game_map, total_to_spawn=100)
 
         print(f"[*] World populated: {len(weapons_manager.state.map_weapons)} weapons, "
               f"{len(potions_manager.state.map_potions)} potions.")
