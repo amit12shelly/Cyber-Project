@@ -8,11 +8,11 @@ services:
       - "4433:4433/udp"
       - "8433:8433"
     environment:
-      - LB_IP=192.168.5.87
+      - LB_IP=192.168.1.156
       - MY_PORT=4433
-      - MY_PUBLIC_IP=192.168.5.87
+      - MY_PUBLIC_IP=192.168.1.156
     extra_hosts:
-      - "lb:192.168.5.87"
+      - "lb:192.168.1.156"
 
   game-server-2:
     build: ./server
@@ -21,11 +21,11 @@ services:
       - "4434:4434/udp"
       - "8434:8434"     # (4434 + 4000)
     environment:
-      - LB_IP=192.168.5.87
+      - LB_IP=192.168.1.156
       - MY_PORT=4434
-      - MY_PUBLIC_IP=192.168.5.87
+      - MY_PUBLIC_IP=192.168.1.156
     extra_hosts:
-      - "lb:192.168.5.87"
+      - "lb:192.168.1.156"
 
   game-server-3:
     build: ./server
@@ -34,8 +34,8 @@ services:
       - "4435:4435/udp"
       - "8435:8435"     # (4435 + 4000)
     environment:
-      - LB_IP=192.168.5.87
+      - LB_IP=192.168.1.156
       - MY_PORT=4435
-      - MY_PUBLIC_IP=192.168.5.87
+      - MY_PUBLIC_IP=192.168.1.156
     extra_hosts:
-      - "lb:192.168.5.87"
+      - "lb:192.168.1.156"
