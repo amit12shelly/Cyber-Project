@@ -6,7 +6,7 @@ SCREEN_HEIGHT = 1080
 TILE_SIZE = 64
 
 MONSTER_TYPES = ["long", "short"]
-MAX_MONSTERS = 101
+MAX_MONSTERS = 100
 
 
 class GlobalState:

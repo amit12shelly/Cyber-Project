@@ -65,16 +65,40 @@ def get_random_valid_position() -> tuple[int, int]:
             with open(MAP_FILENAME, "r") as f:
                 game_map = [line.strip() for line in f.readlines()]
 
+            # שליפת גבולות השרת הנוכחיים מתוך ה-state
+            left_bound = float(state.server_area_left) if state.server_area_left is not None else None
+            right_bound = float(state.server_area_right) if state.server_area_right is not None else None
+
             for row_idx, row in enumerate(game_map):
                 for col_idx, tile in enumerate(row):
                     if tile != "#":
+                        # חישוב ה-X של האריח בפיקסלים
+                        pixel_x = col_idx * TILE_SIZE
+
+                        # סינון האריח לפי גבולות האחריות של השרת (במידה והם מוגדרים)
+                        if left_bound is not None and pixel_x < left_bound:
+                            continue
+                        if right_bound is not None and pixel_x > right_bound:
+                            continue
+
                         valid_tiles.append((col_idx, row_idx))
         except Exception as e:
             print(f"Error reading map file: {e}")
 
+    # במידה ונמצאו אריחים חוקיים בתוך גבולות השרת
     if valid_tiles:
         tile_x, tile_y = random.choice(valid_tiles)
         return tile_x * TILE_SIZE, tile_y * TILE_SIZE
+
+    # ברירת מחדל במידה ולא נמצא אריח (למשל, השרת מחוץ לגבולות המפה או שגיאה בקריאה)
+    # ננסה להחזיר מיקום במרכז הגבולות של השרת הנוכחי כדי לא לזרוק שחקן מחוץ לגבולות שלו
+    if state.server_area_left is not None and state.server_area_right is not None:
+        fallback_x = int((float(state.server_area_left) + float(state.server_area_right)) / 2)
+        return fallback_x, TILE_SIZE
+    elif state.server_area_left is not None:
+        return int(float(state.server_area_left)) + TILE_SIZE, TILE_SIZE
+    elif state.server_area_right is not None:
+        return int(float(state.server_area_right)) - TILE_SIZE, TILE_SIZE
 
     return TILE_SIZE, TILE_SIZE
 
