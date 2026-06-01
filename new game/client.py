@@ -47,7 +47,6 @@ async def quic_network_loop(ip, port):
     try:
         async with connect(ip, port, configuration=config) as client:
             stream_reader, stream_writer = await client.create_stream()
-            print(f"Connected to Game Server at {ip}:{port}!")
 
             connection_alive = True
 
@@ -603,7 +602,6 @@ class Player:
         # self.skill = skill
     def pick_item(self, item):
         self.inventory.append(item)
-        print(f"Picked up {item.name}")
 
     def has_weapon_equipped(self):
         if 0 <= self.selected_slot < len(self.inventory):
@@ -1046,8 +1044,8 @@ def main():
                         new_weapon = Item(player.x, player.y, weapon_images[img_key], "weapon", item_type)
                         new_weapon.ammo = ammo
                         temp_weapons[slot] = new_weapon  # שומרים לפי אינדקס
-                    else:
-                        print(f"[!] Warning: Unknown weapon '{item_type}' from DB")
+                    # else:
+                    #     print(f"[!] Warning: Unknown weapon '{item_type}' from DB")
 
                 elif 5 <= slot <= 10:
                     if item_type == "Potion":
@@ -1130,8 +1128,8 @@ def main():
                             hp_items.remove(nearby_potion)
                             inventory.append(nearby_potion)
                             outgoing_messages.put(f"PPICKUP|{nearby_potion.x},{nearby_potion.y}|{nearby_potion.name}")
-                            print(nearby_potion.name)
-                            print("Picked potion")
+                            # print(nearby_potion.name)
+                            # print("Picked potion")
 
                     if event.key == pygame.K_r:
                         if len(inventory) > 0:
@@ -1163,12 +1161,12 @@ def main():
                             skill.last_action_time = current_time
                             skill.is_active = True
                             player.skill = skill
-                            print("Skill Active!")
+                            # print("Skill Active!")
                             active_skills[MY_ID] = skill
                             outgoing_messages.put(f"SKILL|{skill.name}|{current_time}")
                         else:
                             remaining = total_wait_required - elapsed
-                            print(f"Skill on cooldown. Wait {remaining:.1f}s")
+                            # print(f"Skill on cooldown. Wait {remaining:.1f}s")
 
                     if event.key == pygame.K_q:
                         slot_to_drop = player.selected_slot
@@ -1177,7 +1175,7 @@ def main():
                             dropped = Item(player.x, player.y, gun.image, "weapon", gun.name)
                             loot_items.append(dropped)
                             outgoing_messages.put(f"DROP|{player.x},{player.y}|{slot_to_drop}")
-                            print(f"Dropped {gun.name}")
+                            # print(f"Dropped {gun.name}")
 
                     elif event.key == pygame.K_1:
                         if len(player.inventory) >= 1:
@@ -1224,7 +1222,7 @@ def main():
                 sender_ip, sender_port, msg = incoming_messages.get()
 
                 if msg == "INTERNAL_SERVER_DISCONNECT":
-                    print(f"Server {sender_ip}:{sender_port} disconnected. Removing from list.")
+                    # print(f"Server {sender_ip}:{sender_port} disconnected. Removing from list.")
                     for s in servers:
                         if s.ip == sender_ip and s.port == sender_port:
                             servers.remove(s)
@@ -1236,7 +1234,7 @@ def main():
 
                 # ------------------------------
 
-                print(f"[{sender_ip}:{sender_port}] {msg}")
+                # print(f"[{sender_ip}:{sender_port}] {msg}")
                 parts = msg.split("|")
                 if not parts:
                     continue
@@ -1257,9 +1255,9 @@ def main():
                         servers.append(Server(new_ip, new_port))
                         outgoing_messages.add_server(new_ip, new_port)
                         start_quic_thread(new_ip, new_port)
-                        print("connect to the other server")
-                    else:
-                        print(f"Already connected to {new_ip}:{new_port}, forcing handoff sync.")
+                        # print("connect to the other server")
+                    # else:
+                    #     # print(f"Already connected to {new_ip}:{new_port}, forcing handoff sync.")
 
                     current_inv_parts = []
                     for i in range(5):
@@ -1296,7 +1294,7 @@ def main():
                     if server_to_remove:
                         servers.remove(server_to_remove)
                         outgoing_messages.remove_server(server_to_remove.ip, server_to_remove.port)
-                        print(f"Disconnected from old server {server_to_remove.ip}:{server_to_remove.port}")
+                        # print(f"Disconnected from old server {server_to_remove.ip}:{server_to_remove.port}")
 
                     is_transferring = False
 
@@ -1324,12 +1322,12 @@ def main():
                     player_id = parts[1]
                     if player_id == MY_ID:
                         if is_transferring:
-                            print(f"Ignored REMOVE from {sender_ip}:{sender_port} because we are transferring to a new server.")
+                            # print(f"Ignored REMOVE from {sender_ip}:{sender_port} because we are transferring to a new server.")
                             continue
 
                         is_active_server = any(srv.ip == sender_ip and srv.port == sender_port for srv in servers)
                         if not is_active_server:
-                            print(f"Ignored REMOVE for MY_ID from disconnected server {sender_ip}:{sender_port}")
+                            # print(f"Ignored REMOVE for MY_ID from disconnected server {sender_ip}:{sender_port}")
                             continue
                         else:
                             pygame.quit()
@@ -1385,8 +1383,8 @@ def main():
                     if type_dropped in weapon_images:
                         img = weapon_images[type_dropped]
                         loot_items.append(Item(x_dropped, y_dropped, img, "weapon", type_dropped))
-                    else:
-                        print(f"Warning: Unknown weapon type dropped: {type_dropped}")
+                    # else:
+                    #     print(f"Warning: Unknown weapon type dropped: {type_dropped}")
 
                 elif parts[0] == "UNDROPPED":
                     if len(parts) < 3:
@@ -1540,7 +1538,7 @@ def main():
                     skill.is_active = False
                     player.skill = skill
                     del active_skills[MY_ID]
-                    print("Skill duration finished! (Speed boost ended)")
+                    # print("Skill duration finished! (Speed boost ended)")
             draw_fps(screen, clock, chat_font, server_fps)
             draw_inventory(screen, player, chat_font)
             draw_chat(screen, chat_font, chat_messages, chat_open, chat_input)
